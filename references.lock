@@ -1,0 +1,82 @@
+# Reference documents lockfile for swfr (TSD 1.5).
+# Managed via the fetch-references workflow and owned by @wastaken90XD.
+
+[[ref]]
+name = "libretro-h"
+url = "https://raw.githubusercontent.com/libretro/libretro-common/master/include/libretro.h"
+sha256 = "036ddffc995ad116c3081ca0a7515d09c2a116f3483e4f5012fe0c29a885da76"
+dest = "docs/reference/libretro.h"
+commit = true
+license_note = "MIT License (libretro-common); redistribution allowed."
+
+[[ref]]
+name = "libretro-docs"
+url = "https://docs.libretro.com/development/cores/developing-cores/"
+sha256 = ""
+dest = "docs/reference/libretro-docs.html"
+commit = false
+license_note = "Online documentation; read directly from the web (commit = false)."
+
+[[ref]]
+name = "core-info-example"
+url = "https://raw.githubusercontent.com/libretro/libretro-super/master/dist/info/00_example_libretro.info"
+sha256 = "80d512323d2b80a10f66f95304c06a1c21e6101026220f8c8e50a4031113a086"
+dest = "docs/reference/00_example_libretro.info"
+commit = true
+license_note = "MIT License (libretro-super); redistribution allowed."
+
+[[ref]]
+name = "swf-spec-v19"
+url = "https://open-flash.github.io/mirrors/swf-spec-19.pdf"
+sha256 = ""
+dest = "docs/reference/swf-file-format-spec-v19.pdf"
+commit = false
+license_note = "Adobe SWF File Format Specification v19 carries a single-copy print restriction; do not commit to a public repo."
+
+[[ref]]
+name = "swf-ksy"
+url = "https://raw.githubusercontent.com/kaitai-io/kaitai_struct_formats/master/executable/swf.ksy"
+sha256 = "6955abe02654e1e7c62f7ad6452774572c6437d96a54e8e0a8b39d191796bb25"
+dest = "docs/reference/swf.ksy"
+commit = true
+license_note = "CC0-1.0 (kaitai_struct_formats executable/swf.ksy); redistribution allowed."
+
+[[ref]]
+name = "avm2-overview"
+url = "https://open-flash.github.io/mirrors/avm2overview.pdf"
+sha256 = ""
+dest = "docs/reference/avm2overview.pdf"
+commit = false
+license_note = "Adobe ActionScript Virtual Machine 2 (AVM2) Overview carries an all-rights-reserved notice; do not commit to a public repo."
+
+[[ref]]
+name = "ecma-262-ed3"
+url = "https://www.ecma-international.org/wp-content/uploads/ECMA-262_3rd_edition_december_1999.pdf"
+sha256 = ""
+dest = "docs/reference/ECMA-262_3rd_edition_december_1999.pdf"
+commit = false
+license_note = "Ecma International Standard ECMA-262 3rd Edition; read online (commit = false)."
+
+[[ref]]
+name = "lzma-spec"
+url = "https://raw.githubusercontent.com/ip7z/7zip/main/DOC/lzma.txt"
+sha256 = "763541aabe15a9ce043c5c8d7520ee799d0079ffb1c270838ac9ef08c0b26106"
+dest = "docs/reference/lzma.txt"
+commit = true
+license_note = "Public Domain (LZMA SDK / 7-Zip documentation); redistribution allowed."
+
+[[ref]]
+name = "device-font-arimo"
+url = "https://raw.githubusercontent.com/google/fonts/main/ofl/arimo/Arimo%5Bwght%5D.ttf"
+sha256 = "e43898b143ec826ac8cb4034816458a7047fbe0836558de2a1f8c6223ae3e0ca"
+dest = "docs/reference/Arimo.ttf"
+commit = true
+license_note = "SIL Open Font License 1.1 (see docs/reference/Arimo-OFL.txt); redistribution allowed."
+
+[[ref]]
+name = "device-font-arimo-license"
+url = "https://raw.githubusercontent.com/google/fonts/main/ofl/arimo/OFL.txt"
+sha256 = "11cce536cd2f3864d767003af5dcd739e2e15818cf2279b6175edeadd3960992"
+dest = "docs/reference/Arimo-OFL.txt"
+commit = true
+license_note = "SIL Open Font License 1.1 text accompanying Arimo.ttf."

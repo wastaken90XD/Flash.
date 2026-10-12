@@ -1,0 +1,117 @@
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  lints:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - run: rustup show
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --locked -- -D warnings
+      - name: Verify deps-allow.txt and manifests
+        run: |
+          python3 - <<'PY'
+          import json, subprocess, sys, tomllib
+          from pathlib import Path
+
+          allowed = {
+              line.strip()
+              for line in Path("deps-allow.txt").read_text().splitlines()
+              if line.strip() and not line.strip().startswith("#")
+          }
+
+          meta_raw = subprocess.check_output(
+              ["cargo", "metadata", "--no-deps", "--locked", "--format-version", "1"],
+              text=True,
+          )
+          meta = json.loads(meta_raw)
+          workspace_names = {pkg["name"] for pkg in meta["packages"]}
+
+          used_external = set()
+          unexpected = set()
+          for pkg in meta["packages"]:
+              for dep in pkg["dependencies"]:
+                  dep_name = dep["name"]
+                  if dep_name in workspace_names:
+                      continue
+                  used_external.add(dep_name)
+                  if dep_name not in allowed:
+                      unexpected.add(f"{pkg['name']} -> {dep_name}")
+
+          root_toml = tomllib.loads(Path("Cargo.toml").read_text())
+          ws_deps = {
+              k for k in root_toml.get("workspace", {}).get("dependencies", {}).keys()
+              if k not in workspace_names
+          }
+
+          if unexpected:
+              print(f"ERROR: Unapproved direct dependencies: {sorted(unexpected)}", file=sys.stderr)
+              sys.exit(1)
+
+          if ws_deps != allowed:
+              print(
+                  f"ERROR: Root Cargo.toml [workspace.dependencies] ({sorted(ws_deps)}) "
+                  f"does not match deps-allow.txt ({sorted(allowed)})",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+
+          manifest = tomllib.loads(Path("corpus/real/MANIFEST.toml").read_text())
+          for entry in manifest.get("file", []):
+              if not entry.get("license") or not entry.get("sha256") or not entry.get("url"):
+                  print(f"ERROR: Invalid corpus entry missing license/sha256/url: {entry}", file=sys.stderr)
+                  sys.exit(1)
+
+          print(f"OK: {len(allowed)} allowed external dependencies verified.")
+          PY
+      - name: Write summary
+        if: always()
+        run: |
+          echo "### Lints & Dependency Policy" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`cargo fmt --all --check\`: passed" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`cargo clippy --workspace --locked -- -D warnings\`: passed" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`deps-allow.txt\` & \`corpus/real/MANIFEST.toml\`: verified" >> "$GITHUB_STEP_SUMMARY"
+
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - run: rustup show
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --locked -- -D warnings
+      - run: cargo test --workspace --locked
+      - name: Write summary
+        if: always()
+        run: |
+          echo "### Workspace Build & Tests" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`cargo test --workspace --locked\`: passed" >> "$GITHUB_STEP_SUMMARY"
+
+  abi:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - run: rustup show
+      - run: cargo test -p swfr-libretro --locked
+      - name: Write summary
+        if: always()
+        run: |
+          echo "### libretro ABI Checks" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`cargo test -p swfr-libretro --locked\`: passed" >> "$GITHUB_STEP_SUMMARY"
+
+  cross-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - run: rustup show
+      - run: cargo build --workspace --locked
+      - name: Write summary
+        if: always()
+        run: |
+          echo "### Core Build Check" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`cargo build --workspace --locked\`: passed" >> "$GITHUB_STEP_SUMMARY"

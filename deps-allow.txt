@@ -1,0 +1,9 @@
+# Allowed direct external crate dependencies across the swfr workspace.
+# Owned by @wastaken90XD via CODEOWNERS.
+fontdue
+lzma-rs
+miniz_oxide
+png
+symphonia
+tiny-skia
+zune-jpeg

@@ -1,0 +1,16 @@
+# Real-world SWF test corpus manifest (TSD 1.6).
+# Real SWF binaries are never committed to Git; CI fetches them into cache.
+# Every [[file]] entry MUST include a non-empty license, url, sha256, and source_page.
+# Owned by @wastaken90XD via CODEOWNERS.
+
+# Example entry format:
+# [[file]]
+# name = "example-game"
+# url = "https://example.org/example.swf"
+# sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+# license = "CC0-1.0"
+# source_page = "https://example.org/"
+# swf_version = 8
+# frames_to_capture = [1, 30]
+
+file = []

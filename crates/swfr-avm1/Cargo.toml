@@ -1,0 +1,13 @@
+[package]
+name = "swfr-avm1"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+swfr-scene.workspace = true
+swfr-swf.workspace = true
+
+[lints]
+workspace = true

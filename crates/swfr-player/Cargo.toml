@@ -1,0 +1,17 @@
+[package]
+name = "swfr-player"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+swfr-audio.workspace = true
+swfr-avm1.workspace = true
+swfr-avm2.workspace = true
+swfr-render.workspace = true
+swfr-scene.workspace = true
+swfr-swf.workspace = true
+
+[lints]
+workspace = true

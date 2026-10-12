@@ -1,0 +1,13 @@
+[package]
+name = "swfr-harness"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+png.workspace = true
+swfr-player.workspace = true
+
+[lints]
+workspace = true
