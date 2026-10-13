@@ -384,7 +384,7 @@ fn all_supported_tags() -> Vec<Tag> {
                 color_transform: ColorTransform::IDENTITY,
             }],
             actions: vec![ButtonAction {
-                condition: 0x0004,
+                condition: 0,
                 actions: vec![0x07, 0x00],
             }],
         }),

@@ -1745,7 +1745,7 @@ pub fn decode_frame_png(png_bytes: &[u8]) -> Result<(u32, u32, Vec<u32>), String
 /// # Errors
 ///
 /// Returns an error string on dimension mismatch, sanity check failure, or pixel diff exceeding tolerance.
-#[allow(clippy::arithmetic_side_effects)]
+#[allow(clippy::arithmetic_side_effects, clippy::too_many_arguments)]
 pub fn verify_or_create_golden(
     approved_dir: &Path,
     provisional_dir: &Path,
