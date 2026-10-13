@@ -7,7 +7,9 @@ on:
     paths:
       - "Cargo.toml"
       - "crates/**/Cargo.toml"
+      - "crates/**/*.rs"
       - "rust-toolchain.toml"
+      - ".github/workflows/lockfile.yml"
 permissions:
   contents: write
 jobs:
