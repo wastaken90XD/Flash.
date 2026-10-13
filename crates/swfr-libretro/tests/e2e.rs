@@ -1266,10 +1266,9 @@ fn e2e_m5_avm2_diagnostic_notice_and_reset_via_abi() {
         g: 0x80,
         b: 0x40,
     });
-    b.push_tag(&Tag::DoABC {
-        flags: 1,
-        name: "frame1".to_owned(),
-        abc_data: vec![0x10, 0x00, 0x2E, 0x00],
+    b.push_tag(&Tag::Unknown {
+        code: 82,
+        raw: vec![0x01, 0x00, 0x00, 0x00, b'f', b'1', 0x00, 0x10, 0x00, 0x2E, 0x00],
     });
     b.push_tag(&Tag::ShowFrame);
     b.push_tag(&Tag::End);

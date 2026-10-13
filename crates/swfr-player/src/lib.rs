@@ -542,6 +542,24 @@ impl Player {
         let stereo_frames = usize::try_from(stereo_frames_u64).unwrap_or(735);
 
         if let Some(ref mut rt) = self.runtime {
+            if self.frame_count == 1 {
+                let is_avm2 = rt.movie.tags.iter().any(|t| {
+                    matches!(
+                        t,
+                        Tag::FileAttributes {
+                            actionscript3: true,
+                            ..
+                        } | Tag::Unknown { code: 72 | 82, .. }
+                    )
+                });
+                if is_avm2 {
+                    self.logs.push(LogRecord {
+                        level: LogLevel::Warn,
+                        message: "[swfr] Notice: AVM2 (ActionScript 3 / DoABC) movie detected; AVM2 bytecode is not executed in v1, rendering vector timeline.".to_owned(),
+                    });
+                }
+            }
+
             // 1. Deliver keyboard input to AVM1
             for kev in &input.keys {
                 rt.vm.set_key_state(kev.keycode, kev.down);
