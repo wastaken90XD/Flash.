@@ -565,7 +565,7 @@ pub fn copy_c_str_from_callback_ptr(ptr: *const c_char) -> String {
 
 /// Casts a non-variadic `extern "C" fn(c_int, *const c_char)` test logger to [`RetroLogPrintfFn`].
 ///
-/// Because [`emit_log`] passes the complete formatted message (with `%` escaped) in the fixed
+/// Because `emit_log` passes the complete formatted message (with `%` escaped) in the fixed
 /// `fmt` parameter without consuming variadic arguments, the fixed parameter ABI matches across
 /// `x86_64`, `i686`, `aarch64`, and `armv7`.
 #[must_use]
