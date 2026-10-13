@@ -1,6 +1,13 @@
 //! M4 AS1/AS2 Conformance Suite (`crates/swfr-avm1/tests/conformance.rs`).
 //! Generates and runs 160 distinct SWF movies with `SwfBuilder` and `ActionBuilder`,
 //! verifying every movie's `trace()` output against ECMA-262 3rd edition semantics (TSD 3.1.6, 3.6 M4).
+#![allow(
+    clippy::panic,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects
+)]
 
 use swfr_avm1::Avm1;
 use swfr_scene::Stage;

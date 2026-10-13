@@ -409,7 +409,9 @@ impl Heap {
                     if idx >= arr.len() {
                         arr.resize(idx.saturating_add(1), Value::Undefined);
                     }
-                    arr[idx] = val;
+                    if let Some(slot) = arr.get_mut(idx) {
+                        *slot = val;
+                    }
                     obj.props
                         .insert("length".to_owned(), Value::Number(arr.len() as f64));
                     return;
@@ -2054,7 +2056,7 @@ impl Avm1 {
                         .map_or(len, |v| v.to_i32(self.swf_version).clamp(0, len))
                         as usize;
                     let slice = if start <= end {
-                        elems[start..end].to_vec()
+                        elems.get(start..end).unwrap_or(&[]).to_vec()
                     } else {
                         Vec::new()
                     };

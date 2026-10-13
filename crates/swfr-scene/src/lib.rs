@@ -411,20 +411,20 @@ fn flatten_records(
     let mut cur_fills: Vec<FillStyle> = initial_fills.to_vec();
     let mut cur_lines: Vec<LineStyle> = initial_lines.to_vec();
 
-    let mut fill_edges: BTreeMap<u32, Vec<DirectedEdge>> = BTreeMap::new();
-    let mut line_edges: BTreeMap<u32, Vec<DirectedEdge>> = BTreeMap::new();
+    let mut fill_edges: BTreeMap<u16, Vec<DirectedEdge>> = BTreeMap::new();
+    let mut line_edges: BTreeMap<u16, Vec<DirectedEdge>> = BTreeMap::new();
 
     let mut out_fills: Vec<FillPath> = Vec::new();
     let mut out_strokes: Vec<StrokePath> = Vec::new();
 
     let mut cur_x: i32 = 0;
     let mut cur_y: i32 = 0;
-    let mut fill0: u32 = 0;
-    let mut fill1: u32 = 0;
-    let mut line: u32 = 0;
+    let mut fill0: u16 = 0;
+    let mut fill1: u16 = 0;
+    let mut line: u16 = 0;
 
-    let flush_group = |fill_edges: &mut BTreeMap<u32, Vec<DirectedEdge>>,
-                       line_edges: &mut BTreeMap<u32, Vec<DirectedEdge>>,
+    let flush_group = |fill_edges: &mut BTreeMap<u16, Vec<DirectedEdge>>,
+                       line_edges: &mut BTreeMap<u16, Vec<DirectedEdge>>,
                        cur_fills: &[FillStyle],
                        cur_lines: &[LineStyle],
                        out_fills: &mut Vec<FillPath>,
@@ -433,8 +433,7 @@ fn flatten_records(
             if style_idx == 0 {
                 continue;
             }
-            if let Some(style) = cur_fills.get(usize::try_from(style_idx - 1).unwrap_or(usize::MAX))
-            {
+            if let Some(style) = cur_fills.get(usize::from(style_idx - 1)) {
                 let cmds = stitch_edges(edges, true);
                 if !cmds.is_empty() {
                     out_fills.push(FillPath {
@@ -448,8 +447,7 @@ fn flatten_records(
             if style_idx == 0 {
                 continue;
             }
-            if let Some(style) = cur_lines.get(usize::try_from(style_idx - 1).unwrap_or(usize::MAX))
-            {
+            if let Some(style) = cur_lines.get(usize::from(style_idx - 1)) {
                 let cmds = stitch_edges(edges, false);
                 if !cmds.is_empty() {
                     out_strokes.push(StrokePath {
@@ -721,18 +719,22 @@ pub fn decode_lossless_bitmap(bmp: &LosslessBitmapDef) -> Option<DecodedBitmap> 
             if raw.len() < palette_bytes {
                 return None;
             }
-            let palette = &raw[..palette_bytes];
-            let indices = &raw[palette_bytes..];
+            let palette = raw.get(..palette_bytes)?;
+            let indices = raw.get(palette_bytes..)?;
             let row_stride = (width + 3) & !3;
             for y in 0..height {
                 for x in 0..width {
                     let idx = usize::from(*indices.get(y * row_stride + x).unwrap_or(&0));
                     let p_off = idx * entry_bytes;
                     if p_off + entry_bytes <= palette.len() {
-                        let r = palette[p_off];
-                        let g = palette[p_off + 1];
-                        let b = palette[p_off + 2];
-                        let a = if has_alpha { palette[p_off + 3] } else { 255 };
+                        let r = palette.get(p_off).copied().unwrap_or(0);
+                        let g = palette.get(p_off + 1).copied().unwrap_or(0);
+                        let b = palette.get(p_off + 2).copied().unwrap_or(0);
+                        let a = if has_alpha {
+                            palette.get(p_off + 3).copied().unwrap_or(255)
+                        } else {
+                            255
+                        };
                         // DefineBitsLossless2 stores premultiplied RGB; unpremultiply for consistent RGBA8
                         let (ur, ug, ub) = unpremultiply(r, g, b, a);
                         rgba.extend_from_slice(&[ur, ug, ub, a]);
@@ -790,7 +792,7 @@ pub fn decode_lossless_bitmap(bmp: &LosslessBitmapDef) -> Option<DecodedBitmap> 
 }
 
 #[allow(clippy::arithmetic_side_effects)]
-const fn unpremultiply(r: u8, g: u8, b: u8, a: u8) -> (u8, u8, u8) {
+fn unpremultiply(r: u8, g: u8, b: u8, a: u8) -> (u8, u8, u8) {
     if a == 0 || a == 255 {
         return (r, g, b);
     }
@@ -817,13 +819,16 @@ pub fn decode_jpeg_or_png_bitmap(
         let mut reader = decoder.read_info().ok()?;
         let mut buf = vec![0_u8; reader.output_buffer_size()?];
         let info = reader.next_frame(&mut buf).ok()?;
-        let bytes = &buf[..info.buffer_size()];
+        let bytes = buf.get(..info.buffer_size())?;
         let mut rgba = Vec::with_capacity((info.width * info.height * 4) as usize);
         match info.color_type {
             png::ColorType::Rgba => rgba.extend_from_slice(bytes),
             png::ColorType::Rgb => {
                 for chunk in bytes.chunks_exact(3) {
-                    rgba.extend_from_slice(&[chunk[0], chunk[1], chunk[2], 255]);
+                    let c0 = chunk.first().copied().unwrap_or(0);
+                    let c1 = chunk.get(1).copied().unwrap_or(0);
+                    let c2 = chunk.get(2).copied().unwrap_or(0);
+                    rgba.extend_from_slice(&[c0, c1, c2, 255]);
                 }
             }
             _ => return None,
@@ -863,12 +868,12 @@ pub fn decode_jpeg_or_png_bitmap(
     for i in 0..count {
         let (r, g, b) = if channels >= 3 {
             (
-                pixels[i * channels],
-                pixels[i * channels + 1],
-                pixels[i * channels + 2],
+                pixels.get(i * channels).copied().unwrap_or(0),
+                pixels.get(i * channels + 1).copied().unwrap_or(0),
+                pixels.get(i * channels + 2).copied().unwrap_or(0),
             )
         } else if channels == 1 {
-            let l = pixels[i];
+            let l = pixels.get(i).copied().unwrap_or(0);
             (l, l, l)
         } else {
             (0, 0, 0)
@@ -890,14 +895,14 @@ pub fn decode_jpeg_or_png_bitmap(
 
 fn strip_erroneous_jpeg_markers(mut data: &[u8], strip_leading_soi: bool) -> &[u8] {
     // Old Flash authoring tools sometimes emit a leading `FF D9 FF D8` before the real stream.
-    if data.len() >= 4 && data[0..4] == [0xFF, 0xD9, 0xFF, 0xD8] {
-        data = &data[4..];
+    if data.starts_with(&[0xFF, 0xD9, 0xFF, 0xD8]) {
+        data = data.get(4..).unwrap_or(data);
     }
-    if strip_leading_soi && data.len() >= 2 && data[0..2] == [0xFF, 0xD8] {
-        data = &data[2..];
+    if strip_leading_soi && data.starts_with(&[0xFF, 0xD8]) {
+        data = data.get(2..).unwrap_or(data);
     }
-    if strip_leading_soi && data.len() >= 2 && data[data.len() - 2..] == [0xFF, 0xD9] {
-        data = &data[..data.len() - 2];
+    if strip_leading_soi && data.ends_with(&[0xFF, 0xD9]) {
+        data = data.get(..data.len().saturating_sub(2)).unwrap_or(data);
     }
     data
 }
@@ -1231,6 +1236,9 @@ impl Stage {
 
                 let (new_state, cond_mask) = match (prev_state, inside, was_down, pressed) {
                     (ButtonState::Up, true, false, false) => (ButtonState::Over, 0x0001), // IdleToOverUp
+                    (ButtonState::Up, true, true, true) if prev_pressed_in => {
+                        (ButtonState::Down, 0x0020) // OutDownToOverDown
+                    }
                     (ButtonState::Up, true, _, true) => {
                         obj.button_pressed_inside = true;
                         (ButtonState::Down, 0x0001 | 0x0004 | 0x0080) // IdleToOverUp | OverUpToOverDown | IdleToOverDown
@@ -1248,9 +1256,6 @@ impl Stage {
                     (ButtonState::Down, false, true, false) => {
                         obj.button_pressed_inside = false;
                         (ButtonState::Up, 0x0040 | 0x0100) // OutDownToIdle | OverDownToIdle
-                    }
-                    (ButtonState::Up, true, true, true) if prev_pressed_in => {
-                        (ButtonState::Down, 0x0020) // OutDownToOverDown
                     }
                     (state, _, _, false) => {
                         obj.button_pressed_inside = false;

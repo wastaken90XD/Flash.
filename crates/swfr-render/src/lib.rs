@@ -46,6 +46,7 @@ impl ShapeCache {
 
     /// Returns a cached [`FlattenedShape`] or computes and inserts it, evicting the least-recently-used
     /// entry when at [`SHAPE_LRU_CAPACITY`].
+    #[allow(clippy::indexing_slicing)]
     pub fn get_or_insert_with<F>(&mut self, key: (u16, u16), compute: F) -> &FlattenedShape
     where
         F: FnOnce() -> FlattenedShape,
@@ -92,12 +93,13 @@ pub struct Renderer {
 impl Renderer {
     /// Creates a new [`Renderer`] for stage dimensions `(width_px, height_px)` and resolution scale (`1` or `2`).
     #[must_use]
+    #[allow(clippy::expect_used)]
     pub fn new(width_px: u32, height_px: u32, scale: u32) -> Self {
         let s = scale.clamp(1, 2);
-        let w = width_px.saturating_mul(s).max(1);
-        let h = height_px.saturating_mul(s).max(1);
+        let w = width_px.saturating_mul(s).clamp(1, 8192);
+        let h = height_px.saturating_mul(s).clamp(1, 8192);
         let pixmap = Pixmap::new(w, h).unwrap_or_else(|| Pixmap::new(1, 1).expect("1x1 pixmap"));
-        let count = usize::try_from(w.saturating_mul(h)).unwrap_or(1);
+        let count = usize::try_from(pixmap.width().saturating_mul(pixmap.height())).unwrap_or(1);
         Self {
             pixmap,
             xrgb_buf: vec![0; count],
@@ -228,7 +230,7 @@ impl Renderer {
         &self.rgb565_buf
     }
 
-    #[allow(clippy::arithmetic_side_effects)]
+    #[allow(clippy::arithmetic_side_effects, clippy::indexing_slicing)]
     fn sync_output_buffers(&mut self) {
         let data = self.pixmap.data();
         for (i, px) in data.chunks_exact(4).enumerate() {
@@ -237,8 +239,12 @@ impl Renderer {
             let g = u32::from(px[1]);
             let b = u32::from(px[2]);
             let xrgb = (r << 16) | (g << 8) | b;
-            self.xrgb_buf[i] = xrgb;
-            self.rgb565_buf[i] = xrgb_to_rgb565(xrgb);
+            if let Some(slot) = self.xrgb_buf.get_mut(i) {
+                *slot = xrgb;
+            }
+            if let Some(slot565) = self.rgb565_buf.get_mut(i) {
+                *slot565 = xrgb_to_rgb565(xrgb);
+            }
         }
     }
 }
@@ -274,19 +280,19 @@ fn render_display_list(
 
         if let Some(clip_end) = obj.clip_depth {
             if clip_end > depth {
-                let mut mask_pm = Pixmap::new(pixmap.width(), pixmap.height())
-                    .unwrap_or_else(|| Pixmap::new(1, 1).expect("1x1 mask pixmap"));
-                render_object(
-                    &mut mask_pm,
-                    cache,
-                    obj,
-                    dict,
-                    obj_xform,
-                    ColorTransform::IDENTITY,
-                    None,
-                );
-                let mask = Mask::from_pixmap(mask_pm.as_ref(), tiny_skia::MaskType::Alpha);
-                active_clip = Some((clip_end, mask));
+                if let Some(mut mask_pm) = Pixmap::new(pixmap.width(), pixmap.height()) {
+                    render_object(
+                        &mut mask_pm,
+                        cache,
+                        obj,
+                        dict,
+                        obj_xform,
+                        ColorTransform::IDENTITY,
+                        None,
+                    );
+                    let mask = Mask::from_pixmap(mask_pm.as_ref(), tiny_skia::MaskType::Alpha);
+                    active_clip = Some((clip_end, mask));
+                }
                 continue;
             }
         }
@@ -791,7 +797,7 @@ const fn combine_cxform(parent: ColorTransform, child: ColorTransform) -> ColorT
     }
 }
 
-#[allow(clippy::arithmetic_side_effects)]
+#[allow(clippy::arithmetic_side_effects, clippy::indexing_slicing)]
 fn decoded_bitmap_to_pixmap(bmp: &DecodedBitmap, cx: ColorTransform) -> Option<Pixmap> {
     let mut pm = Pixmap::new(bmp.width, bmp.height)?;
     let dst = pm.data_mut();

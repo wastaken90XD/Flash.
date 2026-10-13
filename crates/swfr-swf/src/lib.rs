@@ -58,6 +58,26 @@ pub struct Header {
     pub frame_count: u16,
 }
 
+impl Header {
+    /// Stage width in whole pixels (`>= 1`).
+    #[must_use]
+    pub fn width_px(&self) -> u32 {
+        self.frame_size.width_px().max(1)
+    }
+
+    /// Stage height in whole pixels (`>= 1`).
+    #[must_use]
+    pub fn height_px(&self) -> u32 {
+        self.frame_size.height_px().max(1)
+    }
+
+    /// Frame rate in frames per second (`1.0..=120.0`).
+    #[must_use]
+    pub const fn fps(&self) -> f32 {
+        self.frame_rate
+    }
+}
+
 /// RGBA color value.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Rgba {
@@ -69,6 +89,14 @@ pub struct Rgba {
     pub b: u8,
     /// Alpha channel (`0..=255`).
     pub a: u8,
+}
+
+impl Rgba {
+    /// Constructs an opaque RGBA color (`a = 255`).
+    #[must_use]
+    pub const fn rgb(r: u8, g: u8, b: u8) -> Self {
+        Self { r, g, b, a: 255 }
+    }
 }
 
 /// Gradient control stop (`GRADRECORD`).
@@ -286,6 +314,9 @@ pub struct GlyphEntry {
     pub advance_twips: i32,
 }
 
+/// Type alias for [`GlyphEntry`].
+pub type TextGlyphEntry = GlyphEntry;
+
 /// Text run record (`TEXTRECORD`) inside `DefineText` / `DefineText2`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TextRecord {
@@ -415,7 +446,14 @@ pub enum SoundFormat {
     Unknown(u8),
 }
 
+/// Type alias for [`SoundFormat`].
+pub type AudioFormat = SoundFormat;
+
+#[allow(non_upper_case_globals)]
 impl SoundFormat {
+    /// Alias for [`SoundFormat::UncompressedLittleEndian`].
+    pub const PcmLittleEndian: Self = Self::UncompressedLittleEndian;
+
     /// Converts a 4-bit SWF sound format code into [`SoundFormat`].
     #[must_use]
     pub const fn from_code(code: u8) -> Self {

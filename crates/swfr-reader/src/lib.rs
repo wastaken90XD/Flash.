@@ -113,6 +113,9 @@ impl Default for Matrix {
 }
 
 impl Matrix {
+    /// Identity transform constant (`scale = 1.0`, `rotate = 0.0`, `translate = 0`).
+    pub const IDENTITY: Self = Self::identity();
+
     /// Returns the identity matrix (`scale = 1.0`, `rotate = 0.0`, `translate = 0`).
     #[must_use]
     pub const fn identity() -> Self {
@@ -175,6 +178,9 @@ impl Default for ColorTransform {
 }
 
 impl ColorTransform {
+    /// Identity color transform constant (`mult = 256`, `add = 0`).
+    pub const IDENTITY: Self = Self::identity();
+
     /// Returns the identity color transform (`mult = 256`, `add = 0`).
     #[must_use]
     pub const fn identity() -> Self {
@@ -536,6 +542,93 @@ impl<'a> Reader<'a> {
         }
         self.align();
         Ok(cx)
+    }
+
+    /// Alias for [`Reader::is_empty`].
+    #[must_use]
+    pub const fn is_eof(&self) -> bool {
+        self.is_empty()
+    }
+
+    /// Alias for [`Reader::u8`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ParseError`] on unexpected EOF.
+    pub fn read_u8(&mut self) -> Result<u8, ParseError> {
+        self.u8()
+    }
+
+    /// Alias for [`Reader::u16`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ParseError`] on unexpected EOF.
+    pub fn read_u16(&mut self) -> Result<u16, ParseError> {
+        self.u16()
+    }
+
+    /// Alias for [`Reader::u32`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ParseError`] on unexpected EOF.
+    pub fn read_u32(&mut self) -> Result<u32, ParseError> {
+        self.u32()
+    }
+
+    /// Alias for [`Reader::i16`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ParseError`] on unexpected EOF.
+    pub fn read_i16(&mut self) -> Result<i16, ParseError> {
+        self.i16()
+    }
+
+    /// Alias for [`Reader::i32`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ParseError`] on unexpected EOF.
+    pub fn read_i32(&mut self) -> Result<i32, ParseError> {
+        self.i32()
+    }
+
+    /// Alias for [`Reader::ubits`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ParseError`] on unexpected EOF or invalid bit count.
+    pub fn read_ubits(&mut self, n: u8) -> Result<u32, ParseError> {
+        self.ubits(n)
+    }
+
+    /// Alias for [`Reader::sbits`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ParseError`] on unexpected EOF or invalid bit count.
+    pub fn read_sbits(&mut self, n: u8) -> Result<i32, ParseError> {
+        self.sbits(n)
+    }
+
+    /// Alias for [`Reader::bytes`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ParseError`] on unexpected EOF.
+    pub fn read_bytes(&mut self, len: usize) -> Result<&'a [u8], ParseError> {
+        self.bytes(len)
+    }
+
+    /// Alias for [`Reader::string`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ParseError`] on unexpected EOF.
+    pub fn read_c_string(&mut self) -> Result<String, ParseError> {
+        self.string()
     }
 }
 

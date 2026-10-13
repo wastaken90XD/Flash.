@@ -1,6 +1,13 @@
 //! M2 & M3 golden rendering tests (`crates/swfr-render/tests/render_goldens.rs`).
 //! Enforces TSD 2.13 tolerance (per-channel <= 2, <= 1% outlier pixels) and TSD 3.7
 //! provisional golden coordinate sanity checks.
+#![allow(
+    clippy::panic,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects
+)]
 
 use std::path::Path;
 use swfr_reader::{ColorTransform, Matrix, Rect};
@@ -17,8 +24,8 @@ fn rect_records(
     y0: i32,
     w: i32,
     h: i32,
-    fill1: u32,
-    line: Option<u32>,
+    fill1: u16,
+    line: Option<u16>,
 ) -> Vec<ShapeRecord> {
     vec![
         ShapeRecord::StyleChange {

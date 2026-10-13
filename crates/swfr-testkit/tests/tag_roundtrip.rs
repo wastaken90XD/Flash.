@@ -1,5 +1,12 @@
 //! M1 verification: SWF v19 tag round-trip tests, FWS/CWS/ZWS container tests,
 //! decompression limit tests, and 100,000-iteration deterministic mutator test.
+#![allow(
+    clippy::panic,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects
+)]
 
 use swfr_reader::{ColorTransform, Matrix, Rect};
 use swfr_swf::{
@@ -268,10 +275,6 @@ fn all_supported_tags() -> Vec<Tag> {
             is_italic: false,
             glyphs: vec![sample_records.clone()],
             codes: Vec::new(),
-            ascent: 0,
-            descent: 0,
-            leading: 0,
-            advances: Vec::new(),
         }),
         Tag::DefineFontInfo {
             font_id: 20,
@@ -286,10 +289,6 @@ fn all_supported_tags() -> Vec<Tag> {
             is_italic: false,
             glyphs: vec![sample_records.clone()],
             codes: vec![65],
-            ascent: 0,
-            descent: 0,
-            leading: 0,
-            advances: Vec::new(),
         }),
         Tag::DefineFont(FontDef {
             id: 22,
@@ -299,10 +298,6 @@ fn all_supported_tags() -> Vec<Tag> {
             is_italic: true,
             glyphs: vec![sample_records],
             codes: vec![66],
-            ascent: 0,
-            descent: 0,
-            leading: 0,
-            advances: Vec::new(),
         }),
         Tag::DefineFontAlignZones {
             font_id: 22,
@@ -625,7 +620,7 @@ fn roundtrip_compressions_fws_cws_zws_and_long_tags() {
 
     // Verify custom limits can also cap tag count
     let small_limits = Limits {
-        max_tags: 2,
+        max_tag_count: 2,
         ..Limits::default()
     };
     let mut many_tags = SwfBuilder::new(8, 100, 100, 60.0, 1);

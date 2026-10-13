@@ -46,7 +46,7 @@ pub const fn swf_rate_hz(rate_code: u8) -> f64 {
 /// Decodes raw PCM audio (`UncompressedNativeEndian` or `PcmLittleEndian`) into stereo `[L, R]`
 /// frames at the source sample rate.
 #[must_use]
-#[allow(clippy::arithmetic_side_effects)]
+#[allow(clippy::arithmetic_side_effects, clippy::indexing_slicing)]
 pub fn decode_pcm_to_stereo(data: &[u8], is_16bit: bool, is_stereo: bool) -> Vec<[i16; 2]> {
     let mut out = Vec::new();
     if is_16bit {
@@ -146,7 +146,7 @@ pub fn decode_swf_adpcm(data: &[u8], is_stereo: bool, max_samples: usize) -> Vec
     out
 }
 
-#[allow(clippy::arithmetic_side_effects)]
+#[allow(clippy::arithmetic_side_effects, clippy::indexing_slicing)]
 fn step_adpcm_channel(
     code: u32,
     nbits: u8,
@@ -181,7 +181,7 @@ fn step_adpcm_channel(
 /// or 4-byte `SampleCount + SeekSamples` prefix for `SoundStreamBlock`) into stereo `[L, R]`
 /// frames and returns `(sample_rate_hz, frames)`.
 #[must_use]
-#[allow(clippy::arithmetic_side_effects)]
+#[allow(clippy::arithmetic_side_effects, clippy::indexing_slicing)]
 pub fn decode_swf_mp3(data: &[u8], is_stream_block: bool) -> (f64, Vec<[i16; 2]>) {
     let header_skip = if is_stream_block { 4 } else { 2 };
     if data.len() <= header_skip {
@@ -253,7 +253,7 @@ pub fn decode_swf_mp3(data: &[u8], is_stream_block: bool) -> (f64, Vec<[i16; 2]>
 
 /// Linearly resamples stereo `[L, R]` frames from `src_rate_hz` to `44100.0` Hz (`OUTPUT_SAMPLE_RATE`).
 #[must_use]
-#[allow(clippy::arithmetic_side_effects)]
+#[allow(clippy::arithmetic_side_effects, clippy::indexing_slicing)]
 pub fn resample_to_44k1(frames: &[[i16; 2]], src_rate_hz: f64) -> Vec<[i16; 2]> {
     if frames.is_empty() {
         return Vec::new();
@@ -445,7 +445,7 @@ impl AudioMixer {
     /// Mixes `num_frames` stereo samples (`num_frames * 2` `i16` values) at 44.1 kHz into
     /// an interleaved `[L, R, L, R, ...]` buffer.
     #[must_use]
-    #[allow(clippy::arithmetic_side_effects)]
+    #[allow(clippy::arithmetic_side_effects, clippy::indexing_slicing)]
     pub fn mix_interleaved(&mut self, num_frames: usize) -> Vec<i16> {
         let mut out = vec![0_i16; num_frames.saturating_mul(2)];
         let vol = self.volume_percent.clamp(0, 100);
@@ -531,6 +531,13 @@ pub fn hash_audio_samples(samples: &[i16]) -> u64 {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::panic,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects
+)]
 mod tests {
     use super::*;
     use swfr_testkit::BitWriter;

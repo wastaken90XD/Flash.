@@ -6,9 +6,8 @@ use std::io::Cursor;
 use std::path::Path;
 use swfr_reader::{ColorTransform, Matrix, Rect};
 use swfr_swf::{
-    ButtonDef, Compression, EditTextDef, FillStyle, FontDef, LineStyle, LosslessBitmapDef,
-    MorphShapeDef, PlaceObject2Tag, PlaceObjectTag, Rgba, ShapeDef, ShapeRecord, SoundDef,
-    SoundInfo, SoundStreamHeadDef, Tag, TextDef,
+    ButtonDef, Compression, EditTextDef, FillStyle, FontDef, LineStyle, MorphShapeDef,
+    PlaceObject2Tag, Rgba, ShapeDef, ShapeRecord, SoundInfo, Tag, TextDef,
 };
 
 /// Bit-level and byte-level buffer writer mirroring [`swfr_reader::Reader`].

@@ -266,7 +266,11 @@ pub fn build_benchmark_swf() -> Vec<u8> {
 ///
 /// Panics if the average per-frame cost exceeds the 30% regression gate (`<= 5.0 ms/frame` on `ubuntu-latest`).
 #[must_use]
-#[allow(clippy::arithmetic_side_effects)]
+#[allow(
+    clippy::arithmetic_side_effects,
+    clippy::expect_used,
+    clippy::panic
+)]
 pub fn run_benchmark_suite() -> String {
     let swf_bytes = build_benchmark_swf();
     let t_parse = Instant::now();
