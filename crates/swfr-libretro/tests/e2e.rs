@@ -194,7 +194,7 @@ fn is_440hz_sine_batch(samples: &[i16]) -> bool {
         return false;
     }
     let two_pi_440 = core::f64::consts::TAU * 440.0 / 44_100.0;
-    for (frame_idx, pair) in samples.chunks_exact(2).take(32).enumerate() {
+    for (frame_idx, pair) in samples.as_chunks::<2>().0.iter().take(32).enumerate() {
         let expected = ((frame_idx as f64 * two_pi_440).sin() * 8_000.0) as i16;
         if pair[0] != expected || pair[1] != expected {
             return false;

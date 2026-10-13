@@ -427,9 +427,9 @@ pub fn run_benchmark_suite() -> String {
             "moving-square benchmark must render real green square at frame {f}"
         );
         if f == 1 {
-            assert_ne!(v.xrgb[50 * 200 + 20], prev_center_x0_px);
+            assert_ne!(v.xrgb[50 * 200 + 15], prev_center_x0_px);
         }
-        prev_center_x0_px = v.xrgb[50 * 200 + 20];
+        prev_center_x0_px = v.xrgb[50 * 200 + 15];
     }
     let sq_total_us = t_run_sq.elapsed().as_micros();
     let sq_avg_us = sq_total_us / u128::from(frames);
