@@ -396,6 +396,11 @@ jobs:
           PY
           fi
 
+          # Sync Issue #10 (v1 engineering-complete report) with docs/FINAL_REPORT.md
+          if [ -f docs/FINAL_REPORT.md ] && gh api "repos/${GITHUB_REPOSITORY}/issues/10" >/dev/null 2>&1; then
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/issues/10" -F body=@docs/FINAL_REPORT.md >/dev/null || true
+          fi
+
           # Remove any temporary lockfile diagnostic comments from PR #1
           python3 - <<'PY'
           import json, subprocess
