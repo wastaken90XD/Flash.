@@ -18,8 +18,8 @@ use swfr_libretro::ffi::{
     copy_audio_frames_from_callback_ptr, copy_c_str_from_callback_ptr,
     copy_video_frame_from_callback_ptr, install_log_callback_in_environment,
     make_test_log_printf_fn, retro_deinit, retro_game_geometry, retro_game_info,
-    retro_get_system_av_info, retro_init, retro_load_game, retro_reset, retro_run,
-    retro_serialize, retro_serialize_size, retro_set_audio_sample, retro_set_audio_sample_batch,
+    retro_get_system_av_info, retro_init, retro_load_game, retro_reset, retro_run, retro_serialize,
+    retro_serialize_size, retro_set_audio_sample, retro_set_audio_sample_batch,
     retro_set_environment, retro_set_input_poll, retro_set_input_state, retro_set_video_refresh,
     retro_system_av_info, retro_system_timing, retro_unload_game, retro_unserialize,
     RETRO_DEVICE_ID_POINTER_PRESSED, RETRO_DEVICE_ID_POINTER_X, RETRO_DEVICE_ID_POINTER_Y,
@@ -28,8 +28,8 @@ use swfr_libretro::ffi::{
 use swfr_reader::{ColorTransform, Matrix, Rect};
 use swfr_swf::{
     AudioFormat, ButtonAction, ButtonDef, ButtonRecord, Compression, EditTextDef, FillStyle,
-    GradientStop, MorphShapeDef, PlaceObject2Tag, Rgba, ShapeDef, ShapeRecord, SoundDef,
-    SoundInfo, Tag,
+    GradientStop, MorphShapeDef, PlaceObject2Tag, Rgba, ShapeDef, ShapeRecord, SoundDef, SoundInfo,
+    Tag,
 };
 use swfr_testkit::{ActionBuilder, SwfBuilder};
 
@@ -1329,4 +1329,3 @@ fn e2e_m6_repeated_load_unload_50_cycles_via_abi() {
 
     retro_deinit();
 }
-
