@@ -3,6 +3,7 @@
 //! All numeric values and struct layouts are verified against `docs/reference/libretro.h`
 //! (see `docs/notes/libretro-abi.md` for line numbers) and tested automatically by
 //! `crates/swfr-libretro/tests/header_check.rs`.
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
 
 use crate::input_map::RawInputSnapshot;
 use crate::options::{apply_option_kv, ALL_OPTION_KEYS};
