@@ -584,7 +584,11 @@ fn emit_log(log_cb: Option<RetroLogPrintfFn>, level: LogLevel, message: &str) {
         bytes.push(0);
         // SAFETY: `bytes` is NUL-terminated and `LOG_FMT_STR` is `"%s\n\0"`, so `cb` reads a valid C string.
         unsafe {
-            cb(retro_level, LOG_FMT_STR.as_ptr(), bytes.as_ptr().cast::<c_char>());
+            cb(
+                retro_level,
+                LOG_FMT_STR.as_ptr(),
+                bytes.as_ptr().cast::<c_char>(),
+            );
         }
     }
 }
@@ -949,10 +953,8 @@ pub extern "C" fn retro_run() {
         if let Some(state_cb) = slot.callbacks.input_state_cb {
             raw_input.pointer_pressed =
                 state_cb(0, RETRO_DEVICE_POINTER, 0, RETRO_DEVICE_ID_POINTER_PRESSED) != 0;
-            raw_input.pointer_x =
-                state_cb(0, RETRO_DEVICE_POINTER, 0, RETRO_DEVICE_ID_POINTER_X);
-            raw_input.pointer_y =
-                state_cb(0, RETRO_DEVICE_POINTER, 0, RETRO_DEVICE_ID_POINTER_Y);
+            raw_input.pointer_x = state_cb(0, RETRO_DEVICE_POINTER, 0, RETRO_DEVICE_ID_POINTER_X);
+            raw_input.pointer_y = state_cb(0, RETRO_DEVICE_POINTER, 0, RETRO_DEVICE_ID_POINTER_Y);
 
             raw_input.mouse_dx = state_cb(0, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_X);
             raw_input.mouse_dy = state_cb(0, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_Y);

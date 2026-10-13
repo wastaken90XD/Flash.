@@ -67,12 +67,7 @@ extern "C" fn mock_environment(cmd: c_uint, _data: *mut c_void) -> bool {
     false
 }
 
-extern "C" fn mock_video_refresh(
-    data: *const c_void,
-    width: c_uint,
-    height: c_uint,
-    pitch: usize,
-) {
+extern "C" fn mock_video_refresh(data: *const c_void, width: c_uint, height: c_uint, pitch: usize) {
     let pixels = copy_video_frame_from_callback_ptr(data, width, height);
     if let Ok(mut guard) = FRONTEND.lock() {
         guard.video_calls = guard.video_calls.saturating_add(1);
@@ -100,12 +95,7 @@ extern "C" fn mock_input_poll() {
     }
 }
 
-extern "C" fn mock_input_state(
-    _port: c_uint,
-    _device: c_uint,
-    _index: c_uint,
-    _id: c_uint,
-) -> i16 {
+extern "C" fn mock_input_state(_port: c_uint, _device: c_uint, _index: c_uint, _id: c_uint) -> i16 {
     0
 }
 
@@ -178,7 +168,10 @@ fn full_libretro_abi_lifecycle_and_fault_containment() {
 
     if let Ok(guard) = FRONTEND.lock() {
         assert!(guard.pixel_format_set);
-        assert_eq!(guard.poll_calls, 600, "input_poll must be called once per retro_run");
+        assert_eq!(
+            guard.poll_calls, 600,
+            "input_poll must be called once per retro_run"
+        );
         assert_eq!(guard.video_calls, 600);
         assert_eq!(guard.last_width, 320);
         assert_eq!(guard.last_height, 240);

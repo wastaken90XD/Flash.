@@ -250,7 +250,10 @@ impl core::fmt::Display for PlayerError {
         match self {
             Self::EmptyInput => write!(f, "SWF input buffer is empty"),
             Self::InputTooLarge { size, limit } => {
-                write!(f, "SWF input size ({size} bytes) exceeds limit ({limit} bytes)")
+                write!(
+                    f,
+                    "SWF input size ({size} bytes) exceeds limit ({limit} bytes)"
+                )
             }
             Self::MalformedHeader(msg) => write!(f, "malformed SWF header: {msg}"),
         }
@@ -512,8 +515,7 @@ mod tests {
     #[test]
     fn stub_player_renders_320x240_color_bars_and_440hz_tone() {
         let opts = Options::default();
-        let mut player =
-            Player::new(b"SWFR_STUB", None, &opts).unwrap_or_else(|_| unreachable!());
+        let mut player = Player::new(b"SWFR_STUB", None, &opts).unwrap_or_else(|_| unreachable!());
         let av = player.av_info();
         assert_eq!(av.width, 320);
         assert_eq!(av.height, 240);
@@ -539,8 +541,8 @@ mod tests {
     fn fractional_audio_carry_600_runs_at_12fps_equals_2205000_frames() {
         // Minimal FWS header with 1-byte RECT (0x00) and 8.8 fixed-point fps = 12.0 (0x0c00).
         let swf_12fps = b"FWS\x08\x0d\x00\x00\x00\x00\x00\x0c\x01\x00";
-        let mut player = Player::new(swf_12fps, None, &Options::default())
-            .unwrap_or_else(|_| unreachable!());
+        let mut player =
+            Player::new(swf_12fps, None, &Options::default()).unwrap_or_else(|_| unreachable!());
         assert!((player.av_info().fps - 12.0).abs() < f64::EPSILON);
 
         let mut total_stereo_frames: usize = 0;

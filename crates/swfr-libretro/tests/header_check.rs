@@ -71,8 +71,14 @@ fn all_ffi_defines_match_libretro_h() {
         ("RETRO_DEVICE_NONE", u64::from(ffi::RETRO_DEVICE_NONE)),
         ("RETRO_DEVICE_JOYPAD", u64::from(ffi::RETRO_DEVICE_JOYPAD)),
         ("RETRO_DEVICE_MOUSE", u64::from(ffi::RETRO_DEVICE_MOUSE)),
-        ("RETRO_DEVICE_KEYBOARD", u64::from(ffi::RETRO_DEVICE_KEYBOARD)),
-        ("RETRO_DEVICE_LIGHTGUN", u64::from(ffi::RETRO_DEVICE_LIGHTGUN)),
+        (
+            "RETRO_DEVICE_KEYBOARD",
+            u64::from(ffi::RETRO_DEVICE_KEYBOARD),
+        ),
+        (
+            "RETRO_DEVICE_LIGHTGUN",
+            u64::from(ffi::RETRO_DEVICE_LIGHTGUN),
+        ),
         ("RETRO_DEVICE_ANALOG", u64::from(ffi::RETRO_DEVICE_ANALOG)),
         ("RETRO_DEVICE_POINTER", u64::from(ffi::RETRO_DEVICE_POINTER)),
         (
