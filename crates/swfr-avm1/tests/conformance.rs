@@ -83,7 +83,7 @@ fn avm1_es3_conformance_160_generated_movies() {
 
     // Group 2 (Movies 31..=55): Bitwise operations (&, |, ^, <<, >>, >>>)
     for i in 1..=25_i32 {
-        let lhs = i * 0x1357_9BDF_u32 as i32;
+        let lhs = i.wrapping_mul(0x1357_9BDF_u32 as i32);
         let rhs = (i * 29) ^ 0x5A;
         let sh = (i as u32) & 0x1F;
         let mut ab = ActionBuilder::new();

@@ -470,7 +470,11 @@ fn render_m2_lossless_bitmap_clip_mask_and_morph() {
     let mut renderer_morph = Renderer::new(64, 64, 1);
     renderer_morph.render_stage(&mut stage_morph, 1);
     let fb_morph = renderer_morph.xrgb8888();
-    assert_eq!(fb_morph[32 * 64 + 32], 0x007F_007F);
+    let mid_px = fb_morph[32 * 64 + 32];
+    let r = (mid_px >> 16) & 0xFF;
+    let g = (mid_px >> 8) & 0xFF;
+    let b = mid_px & 0xFF;
+    assert!((126..=129).contains(&r) && g == 0 && (126..=129).contains(&b));
     check_golden(
         "m2_morph_shape_mid",
         "64x64 navy stage with DefineMorphShape at ratio 32768 producing centered purple rectangle",

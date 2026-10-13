@@ -4,7 +4,9 @@
 #![allow(
     clippy::arithmetic_side_effects,
     clippy::collapsible_if,
-    clippy::collapsible_match
+    clippy::collapsible_match,
+    clippy::indexing_slicing,
+    clippy::map_entry
 )]
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -1738,7 +1740,8 @@ impl Avm1 {
         _depth: usize,
     ) -> Value {
         let norm = normalize_key(fname, self.swf_version);
-        match norm.as_str() {
+        let lower = fname.to_ascii_lowercase();
+        match lower.as_str() {
             "number" => args.first().map_or(Value::Number(0.0), |v| {
                 Value::Number(v.to_number(self.swf_version))
             }),
@@ -1787,7 +1790,7 @@ impl Avm1 {
             }
             "gettimer" => Value::Number(self.elapsed_ms as f64),
             "setinterval" | "settimeout" => {
-                let repeat = norm == "setinterval";
+                let repeat = lower == "setinterval";
                 let cb = args.first().cloned().unwrap_or(Value::Undefined);
                 let ms = args
                     .get(1)
@@ -1835,7 +1838,7 @@ impl Avm1 {
         budget: &mut u64,
         depth: usize,
     ) -> Value {
-        let norm = normalize_key(mname, self.swf_version);
+        let norm = mname.to_ascii_lowercase();
 
         // 1. String prototype methods
         if let Value::String(s) = receiver {
@@ -2091,7 +2094,7 @@ impl Avm1 {
         budget: &mut u64,
         _depth: usize,
     ) -> Value {
-        let norm = normalize_key(cname, self.swf_version);
+        let norm = cname.to_ascii_lowercase();
         match norm.as_str() {
             "object" => Value::Object(self.heap.alloc_object(None)),
             "array" => {
