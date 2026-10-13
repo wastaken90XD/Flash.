@@ -1214,7 +1214,7 @@ fn e2e_m5_avm2_diagnostic_notice_and_reset_via_abi() {
     // var so = SharedObject.getLocal("save");
     ab1.push_str("so");
     ab1.push_str("save");
-    ab1.push_int(1);
+    ab1.push_i32(1);
     ab1.push_str("SharedObject");
     ab1.get_var();
     ab1.push_str("getLocal");
@@ -1226,28 +1226,28 @@ fn e2e_m5_avm2_diagnostic_notice_and_reset_via_abi() {
     ab1.push_str("data");
     ab1.get_member();
     ab1.push_str("level");
-    ab1.push_int(3);
+    ab1.push_i32(3);
     ab1.set_member();
     // so.flush();
-    ab1.push_int(0);
+    ab1.push_i32(0);
     ab1.push_str("so");
     ab1.get_var();
     ab1.push_str("flush");
     ab1.call_method();
-    ab1.pop();
-    // Unsafe loadMovie("../evil.swf", "_root") and loadMovie("http://example.com/a.swf", "_root")
+    ab1.op(0x17);
+    // Disallowed loadMovie("../evil.swf", "_root") and loadMovie("http://example.com/a.swf", "_root")
     ab1.push_str("_root");
     ab1.push_str("../evil.swf");
-    ab1.push_int(2);
+    ab1.push_i32(2);
     ab1.push_str("loadMovie");
     ab1.call_function();
-    ab1.pop();
+    ab1.op(0x17);
     ab1.push_str("_root");
     ab1.push_str("http://example.com/a.swf");
-    ab1.push_int(2);
+    ab1.push_i32(2);
     ab1.push_str("loadMovie");
     ab1.call_function();
-    ab1.pop();
+    ab1.op(0x17);
     b1.push_tag(&Tag::DoAction {
         actions: ab1.build(),
     });
@@ -1308,7 +1308,7 @@ fn e2e_m5_avm2_diagnostic_notice_and_reset_via_abi() {
     let mut b2 = SwfBuilder::new(8, 160, 120, 30.0, 1);
     let mut ab2 = ActionBuilder::new();
     ab2.push_str("save");
-    ab2.push_int(1);
+    ab2.push_i32(1);
     ab2.push_str("SharedObject");
     ab2.get_var();
     ab2.push_str("getLocal");

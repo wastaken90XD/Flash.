@@ -111,7 +111,9 @@ impl CoreState {
         self.inject_fault_next_run = false;
         if self.save_ram.len() != 64 * 1024 {
             self.save_ram = vec![0_u8; 64 * 1024];
-            self.save_ram[0..4].copy_from_slice(b"SWFS");
+            if let Some(hdr) = self.save_ram.get_mut(0..4) {
+                hdr.copy_from_slice(b"SWFS");
+            }
         }
     }
 
@@ -144,7 +146,7 @@ impl CoreState {
         self.panic_message = None;
         let mut player =
             Player::new(swf_bytes, base_dir, &self.options).map_err(|err| err.to_string())?;
-        if self.save_ram.len() == 64 * 1024 && &self.save_ram[0..4] == b"SWFS" {
+        if self.save_ram.len() == 64 * 1024 && self.save_ram.get(0..4) == Some(b"SWFS".as_slice()) {
             let _ = player.load_save_ram(&self.save_ram);
         }
         let sram = player.save_ram();

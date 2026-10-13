@@ -1126,7 +1126,9 @@ pub extern "C" fn retro_get_memory_data(id: c_uint) -> *mut c_void {
     with_global(core::ptr::null_mut(), |slot| {
         if slot.state.save_ram.len() != 64 * 1024 {
             slot.state.save_ram = vec![0_u8; 64 * 1024];
-            slot.state.save_ram[0..4].copy_from_slice(b"SWFS");
+            if let Some(hdr) = slot.state.save_ram.get_mut(0..4) {
+                hdr.copy_from_slice(b"SWFS");
+            }
         }
         slot.state.save_ram.as_mut_ptr().cast::<c_void>()
     })
