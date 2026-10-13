@@ -868,23 +868,25 @@ fn e2e_m1_fws_cws_zws_containers_via_abi() {
         Compression::Lzma,
     ] {
         reset_frontend();
-        let mut b = SwfBuilder::new(200, 120, 24.0);
-        b.set_version(13);
-        b.set_compression(compression);
-        b.set_frame_count(1);
+        let mut b = SwfBuilder::new(13, 200, 120, 24.0, 1).with_compression(compression);
         b.push_tag(&Tag::SetBackgroundColor {
             r: 0x00,
             g: 0x00,
             b: 0xFF,
         });
-        b.push_tag(&Tag::DefineShape(rect_shape_def(
-            1,
-            50,
-            20,
-            150,
-            100,
-            Rgba::rgb(0xFF, 0x00, 0x00),
-        )));
+        b.push_tag(&Tag::DefineShape(ShapeDef {
+            id: 1,
+            version: 1,
+            bounds: Rect {
+                x_min: 1000,
+                x_max: 3000,
+                y_min: 400,
+                y_max: 2000,
+            },
+            fill_styles: vec![FillStyle::Solid(Rgba::rgb(0xFF, 0x00, 0x00))],
+            line_styles: Vec::new(),
+            records: rect_shape_records(1000, 400, 2000, 1600),
+        }));
         b.push_tag(&Tag::PlaceObject2(PlaceObject2Tag {
             is_move: false,
             depth: 1,
@@ -897,7 +899,6 @@ fn e2e_m1_fws_cws_zws_containers_via_abi() {
             clip_actions_raw: None,
         }));
         b.push_tag(&Tag::ShowFrame);
-        b.push_tag(&Tag::End);
         let swf = b.build();
 
         let game_info = retro_game_info {
@@ -929,19 +930,22 @@ fn e2e_m2_gradients_morphs_and_sprites_via_abi() {
     reset_frontend();
     init_abi_callbacks();
 
-    let mut b = SwfBuilder::new(160, 120, 30.0);
-    b.set_frame_count(2);
-    b.set_background_color(0x10, 0x10, 0x10);
+    let mut b = SwfBuilder::new(8, 160, 120, 30.0, 2);
+    b.push_tag(&Tag::SetBackgroundColor {
+        r: 0x10,
+        g: 0x10,
+        b: 0x10,
+    });
 
     // Character 1: Linear gradient rectangle (0..80, 0..120)
     let grad_shape = ShapeDef {
         version: 3,
         id: 1,
         bounds: Rect {
-            x_min_twips: 0,
-            x_max_twips: 80 * 20,
-            y_min_twips: 0,
-            y_max_twips: 120 * 20,
+            x_min: 0,
+            x_max: 80 * 20,
+            y_min: 0,
+            y_max: 120 * 20,
         },
         fill_styles: vec![FillStyle::LinearGradient {
             matrix: Matrix::IDENTITY,
@@ -957,68 +961,18 @@ fn e2e_m2_gradients_morphs_and_sprites_via_abi() {
             ],
         }],
         line_styles: Vec::new(),
-        records: vec![
-            ShapeRecord::StyleChange {
-                move_to: Some((0, 0)),
-                fill_style_0: None,
-                fill_style_1: Some(1),
-                line_style: None,
-                new_fill_styles: None,
-                new_line_styles: None,
-            },
-            ShapeRecord::StraightEdge {
-                dx_twips: 80 * 20,
-                dy_twips: 0,
-            },
-            ShapeRecord::StraightEdge {
-                dx_twips: 0,
-                dy_twips: 120 * 20,
-            },
-            ShapeRecord::StraightEdge {
-                dx_twips: -80 * 20,
-                dy_twips: 0,
-            },
-            ShapeRecord::StraightEdge {
-                dx_twips: 0,
-                dy_twips: -120 * 20,
-            },
-        ],
+        records: rect_shape_records(0, 0, 80 * 20, 120 * 20),
     };
     b.push_tag(&Tag::DefineShape(grad_shape));
 
     // Character 2: Morph shape from pure green (ratio 0) to pure red (ratio 65535) on right half
     let morph_bounds = Rect {
-        x_min_twips: 80 * 20,
-        x_max_twips: 160 * 20,
-        y_min_twips: 0,
-        y_max_twips: 120 * 20,
+        x_min: 80 * 20,
+        x_max: 160 * 20,
+        y_min: 0,
+        y_max: 120 * 20,
     };
-    let morph_records = vec![
-        ShapeRecord::StyleChange {
-            move_to: Some((80 * 20, 0)),
-            fill_style_0: None,
-            fill_style_1: Some(1),
-            line_style: None,
-            new_fill_styles: None,
-            new_line_styles: None,
-        },
-        ShapeRecord::StraightEdge {
-            dx_twips: 80 * 20,
-            dy_twips: 0,
-        },
-        ShapeRecord::StraightEdge {
-            dx_twips: 0,
-            dy_twips: 120 * 20,
-        },
-        ShapeRecord::StraightEdge {
-            dx_twips: -80 * 20,
-            dy_twips: 0,
-        },
-        ShapeRecord::StraightEdge {
-            dx_twips: 0,
-            dy_twips: -120 * 20,
-        },
-    ];
+    let morph_records = rect_shape_records(80 * 20, 0, 80 * 20, 120 * 20);
     b.push_tag(&Tag::DefineMorphShape(MorphShapeDef {
         version: 1,
         id: 2,
@@ -1070,7 +1024,6 @@ fn e2e_m2_gradients_morphs_and_sprites_via_abi() {
         clip_actions_raw: None,
     }));
     b.push_tag(&Tag::ShowFrame);
-    b.push_tag(&Tag::End);
     let swf = b.build();
 
     let game_info = retro_game_info {
@@ -1100,18 +1053,21 @@ fn e2e_m3_avm1_closures_edit_text_and_movieclip_props_via_abi() {
     reset_frontend();
     init_abi_callbacks();
 
-    let mut b = SwfBuilder::new(200, 100, 30.0);
-    b.set_frame_count(1);
-    b.set_background_color(0, 0, 0);
+    let mut b = SwfBuilder::new(8, 200, 100, 30.0, 1);
+    b.push_tag(&Tag::SetBackgroundColor {
+        r: 0x00,
+        g: 0x00,
+        b: 0x00,
+    });
 
     // Dynamic text field bound to variable `score_txt`
     b.push_tag(&Tag::DefineEditText(EditTextDef {
         id: 1,
         bounds: Rect {
-            x_min_twips: 10 * 20,
-            x_max_twips: 190 * 20,
-            y_min_twips: 10 * 20,
-            y_max_twips: 80 * 20,
+            x_min: 10 * 20,
+            x_max: 190 * 20,
+            y_min: 10 * 20,
+            y_max: 80 * 20,
         },
         font_id: None,
         font_height_twips: 24 * 20,
@@ -1140,15 +1096,14 @@ fn e2e_m3_avm1_closures_edit_text_and_movieclip_props_via_abi() {
     let mut ab = ActionBuilder::new();
     ab.push_str("score_txt");
     ab.push_str("SCORE 42");
-    ab.set_variable();
+    ab.set_var();
     ab.push_str("score_txt");
-    ab.get_variable();
+    ab.get_var();
     ab.trace();
     b.push_tag(&Tag::DoAction {
         actions: ab.build(),
     });
     b.push_tag(&Tag::ShowFrame);
-    b.push_tag(&Tag::End);
     let swf = b.build();
 
     let game_info = retro_game_info {
@@ -1184,7 +1139,47 @@ fn e2e_m4_savestate_roundtrip_and_streaming_audio_via_abi() {
     reset_frontend();
     init_abi_callbacks();
 
-    let swf = build_10_frame_moving_square_swf();
+    let mut b = SwfBuilder::new(8, 200, 100, 30.0, 10);
+    b.push_tag(&Tag::SetBackgroundColor {
+        r: 0x00,
+        g: 0x00,
+        b: 0x00,
+    });
+    b.push_tag(&Tag::DefineShape(ShapeDef {
+        id: 1,
+        version: 1,
+        bounds: Rect {
+            x_min: 0,
+            x_max: 400,
+            y_min: 0,
+            y_max: 400,
+        },
+        fill_styles: vec![FillStyle::Solid(Rgba::rgb(0x00, 0xFF, 0x00))],
+        line_styles: Vec::new(),
+        records: rect_shape_records(0, 0, 400, 400),
+    }));
+    for f in 0..10_i32 {
+        let x_twips = (10 + f * 10) * 20;
+        let y_twips = 40 * 20;
+        b.push_tag(&Tag::PlaceObject2(PlaceObject2Tag {
+            is_move: f > 0,
+            depth: 1,
+            character_id: if f == 0 { Some(1) } else { None },
+            matrix: Some(Matrix {
+                translate_x: x_twips,
+                translate_y: y_twips,
+                ..Matrix::IDENTITY
+            }),
+            color_transform: None,
+            ratio: None,
+            name: None,
+            clip_depth: None,
+            clip_actions_raw: None,
+        }));
+        b.push_tag(&Tag::ShowFrame);
+    }
+    let swf = b.build();
+
     let game_info = retro_game_info {
         path: c"m4_savestate.swf".as_ptr(),
         data: swf.as_ptr().cast::<c_void>(),
@@ -1251,9 +1246,7 @@ fn e2e_m5_avm2_diagnostic_notice_and_reset_via_abi() {
     reset_frontend();
     init_abi_callbacks();
 
-    let mut b = SwfBuilder::new(160, 120, 30.0);
-    b.set_version(10);
-    b.set_frame_count(1);
+    let mut b = SwfBuilder::new(10, 160, 120, 30.0, 1);
     b.push_tag(&Tag::FileAttributes {
         use_direct_blit: false,
         use_gpu: false,
@@ -1273,7 +1266,6 @@ fn e2e_m5_avm2_diagnostic_notice_and_reset_via_abi() {
         ],
     });
     b.push_tag(&Tag::ShowFrame);
-    b.push_tag(&Tag::End);
     let swf = b.build();
 
     let game_info = retro_game_info {
@@ -1311,7 +1303,39 @@ fn e2e_m6_repeated_load_unload_50_cycles_via_abi() {
     let _guard = E2E_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     init_abi_callbacks();
 
-    let swf = build_1_frame_red_rect_on_blue_stage_swf();
+    let mut b = SwfBuilder::new(8, 200, 160, 24.0, 1);
+    b.push_tag(&Tag::SetBackgroundColor {
+        r: 0x00,
+        g: 0x00,
+        b: 0xFF,
+    });
+    b.push_tag(&Tag::DefineShape(ShapeDef {
+        id: 1,
+        version: 1,
+        bounds: Rect {
+            x_min: 1000,
+            x_max: 3000,
+            y_min: 800,
+            y_max: 2400,
+        },
+        fill_styles: vec![FillStyle::Solid(Rgba::rgb(0xFF, 0x00, 0x00))],
+        line_styles: Vec::new(),
+        records: rect_shape_records(1000, 800, 2000, 1600),
+    }));
+    b.push_tag(&Tag::PlaceObject2(PlaceObject2Tag {
+        is_move: false,
+        depth: 1,
+        character_id: Some(1),
+        matrix: Some(Matrix::IDENTITY),
+        color_transform: None,
+        ratio: None,
+        name: None,
+        clip_depth: None,
+        clip_actions_raw: None,
+    }));
+    b.push_tag(&Tag::ShowFrame);
+    let swf = b.build();
+
     for _ in 0..50 {
         reset_frontend();
         let game_info = retro_game_info {
@@ -1323,7 +1347,7 @@ fn e2e_m6_repeated_load_unload_50_cycles_via_abi() {
         assert!(retro_load_game(core::ptr::addr_of!(game_info)));
         retro_run();
         let fe = FRONTEND.lock().unwrap();
-        assert_eq!(fe.video_frames[0][120 * 320 + 160], 0x00FF_0000);
+        assert_eq!(fe.video_frames[0][80 * 200 + 100], 0x00FF_0000);
         drop(fe);
         retro_unload_game();
     }
