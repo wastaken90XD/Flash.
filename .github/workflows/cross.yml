@@ -1,0 +1,57 @@
+name: cross
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  cross-linux-x86_64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: rustup show
+      - run: cargo build --release -p swfr-libretro --locked
+      - name: Package swfr_libretro.so and check 6 MB budget
+        run: |
+          mkdir -p dist/linux-x86_64
+          cp target/release/libswfr_libretro.so dist/linux-x86_64/swfr_libretro.so
+          cp swfr_libretro.info dist/linux-x86_64/swfr_libretro.info
+          size_bytes=$(stat -c%s dist/linux-x86_64/swfr_libretro.so)
+          echo "swfr_libretro.so (Linux x86_64): ${size_bytes} bytes"
+          if [ "$size_bytes" -ge 6291456 ]; then
+            echo "ERROR: swfr_libretro.so (${size_bytes} bytes) exceeds 6 MB budget" >&2
+            exit 1
+          fi
+          echo "### Linux x86_64 Core Artifact" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`swfr_libretro.so\`: \`${size_bytes}\` bytes" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: swfr_libretro-linux-x86_64
+          path: dist/linux-x86_64/
+
+  cross-windows-x86_64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: rustup show
+      - run: cargo build --release -p swfr-libretro --locked
+      - name: Package swfr_libretro.dll and check 6 MB budget
+        shell: bash
+        run: |
+          mkdir -p dist/windows-x86_64
+          cp target/release/swfr_libretro.dll dist/windows-x86_64/swfr_libretro.dll
+          cp swfr_libretro.info dist/windows-x86_64/swfr_libretro.info
+          size_bytes=$(stat -c%s dist/windows-x86_64/swfr_libretro.dll)
+          echo "swfr_libretro.dll (Windows x86_64): ${size_bytes} bytes"
+          if [ "$size_bytes" -ge 6291456 ]; then
+            echo "ERROR: swfr_libretro.dll (${size_bytes} bytes) exceeds 6 MB budget" >&2
+            exit 1
+          fi
+          echo "### Windows x86_64 Core Artifact" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`swfr_libretro.dll\`: \`${size_bytes}\` bytes" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: swfr_libretro-windows-x86_64
+          path: dist/windows-x86_64/

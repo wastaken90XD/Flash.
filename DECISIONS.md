@@ -19,3 +19,8 @@
 - **Date:** 2026-10-13
 - **Context:** TSD 1.5 notes that Adobe's SWF v19 specification carries a single-copy print notice and the AVM2 overview carries an all-rights-reserved notice.
 - **Decision:** Set `commit = false` in `references.lock` for `swf-spec-v19`, `avm2-overview`, `ecma-262-ed3`, and `libretro-docs`. Only commit explicitly open-licensed references (`libretro.h`, `00_example_libretro.info`, `swf.ksy`, `lzma.txt`, `Arimo.ttf`, and `Arimo-OFL.txt`).
+
+## D-005: Exact Integer Rational Accumulator for Per-Frame Audio Sample Carry
+- **Date:** 2026-10-13
+- **Context:** TSD 2.5 and 2.12 M0 require per-frame stereo sample counts at 44,100 Hz to carry fractional remainders across frames so that over 600 runs at 12 fps the total is exactly 2,205,000 stereo frames without floating-point drift.
+- **Decision:** Represent the SWF frame rate in its native 8.8 fixed-point integer form (`fps_q8 = fps * 256`) and accumulate `44_100 * 256` per frame in `u64`, dividing by `fps_q8` and carrying `numerator % fps_q8` into the next frame.

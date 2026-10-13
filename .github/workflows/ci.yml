@@ -13,11 +13,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: rustup show
       - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --locked -- -D warnings
-      - name: Verify deps-allow.txt and manifests
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Verify deps-allow.txt, unsafe boundary, and manifests
         run: |
           python3 - <<'PY'
-          import json, subprocess, sys, tomllib
+          import json, re, subprocess, sys, tomllib
           from pathlib import Path
 
           allowed = {
@@ -33,14 +33,12 @@ jobs:
           meta = json.loads(meta_raw)
           workspace_names = {pkg["name"] for pkg in meta["packages"]}
 
-          used_external = set()
           unexpected = set()
           for pkg in meta["packages"]:
               for dep in pkg["dependencies"]:
                   dep_name = dep["name"]
                   if dep_name in workspace_names:
                       continue
-                  used_external.add(dep_name)
                   if dep_name not in allowed:
                       unexpected.add(f"{pkg['name']} -> {dep_name}")
 
@@ -62,21 +60,37 @@ jobs:
               )
               sys.exit(1)
 
+          # Verify no `unsafe` or `allow(unsafe_code)` exists outside crates/swfr-libretro/src/ffi.rs
+          # and the single `#[allow(unsafe_code)] pub mod ffi;` declaration in crates/swfr-libretro/src/lib.rs.
+          allowed_ffi = {
+              Path("crates/swfr-libretro/src/ffi.rs"),
+              Path("crates/swfr-libretro/src/lib.rs"),
+          }
+          unsafe_pat = re.compile(r"\bunsafe\b|allow\s*\(\s*unsafe_code\s*\)")
+          for rs_path in sorted(Path("crates").rglob("*.rs")):
+              if rs_path in allowed_ffi:
+                  continue
+              for lineno, line in enumerate(rs_path.read_text().splitlines(), 1):
+                  code = line.split("//", 1)[0]
+                  if unsafe_pat.search(code):
+                      print(f"ERROR: Forbidden unsafe outside ffi at {rs_path}:{lineno}: {line}", file=sys.stderr)
+                      sys.exit(1)
+
           manifest = tomllib.loads(Path("corpus/real/MANIFEST.toml").read_text())
           for entry in manifest.get("file", []):
               if not entry.get("license") or not entry.get("sha256") or not entry.get("url"):
                   print(f"ERROR: Invalid corpus entry missing license/sha256/url: {entry}", file=sys.stderr)
                   sys.exit(1)
 
-          print(f"OK: {len(allowed)} allowed external dependencies verified.")
+          print(f"OK: {len(allowed)} allowed external dependencies and strict ffi unsafe boundary verified.")
           PY
       - name: Write summary
         if: always()
         run: |
-          echo "### Lints & Dependency Policy" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Lints & Safety Policy" >> "$GITHUB_STEP_SUMMARY"
           echo "- \`cargo fmt --all --check\`: passed" >> "$GITHUB_STEP_SUMMARY"
-          echo "- \`cargo clippy --workspace --locked -- -D warnings\`: passed" >> "$GITHUB_STEP_SUMMARY"
-          echo "- \`deps-allow.txt\` & \`corpus/real/MANIFEST.toml\`: verified" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`cargo clippy --workspace --all-targets --locked -- -D warnings\`: passed" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`deps-allow.txt\`, \`unsafe\`-only-in-\`ffi\`, & \`corpus/real/MANIFEST.toml\`: verified" >> "$GITHUB_STEP_SUMMARY"
 
   build-test:
     runs-on: ubuntu-latest
@@ -84,13 +98,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: rustup show
       - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --locked -- -D warnings
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
+      - run: cargo run -p swfr-harness --locked -- info
       - name: Write summary
         if: always()
         run: |
           echo "### Workspace Build & Tests" >> "$GITHUB_STEP_SUMMARY"
           echo "- \`cargo test --workspace --locked\`: passed" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`cargo run -p swfr-harness --locked -- info\`: passed" >> "$GITHUB_STEP_SUMMARY"
 
   abi:
     runs-on: ubuntu-latest
@@ -98,20 +114,27 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: rustup show
       - run: cargo test -p swfr-libretro --locked
+      - run: cargo test -p swfr-libretro --features fault-inject --locked
       - name: Write summary
         if: always()
         run: |
-          echo "### libretro ABI Checks" >> "$GITHUB_STEP_SUMMARY"
+          echo "### libretro ABI & Header Verification" >> "$GITHUB_STEP_SUMMARY"
           echo "- \`cargo test -p swfr-libretro --locked\`: passed" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`cargo test -p swfr-libretro --features fault-inject --locked\`: passed" >> "$GITHUB_STEP_SUMMARY"
 
   cross-build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: rustup show
-      - run: cargo build --workspace --locked
-      - name: Write summary
-        if: always()
+      - run: cargo build --release -p swfr-libretro --locked
+      - name: Check core library size budget (< 6 MB)
         run: |
-          echo "### Core Build Check" >> "$GITHUB_STEP_SUMMARY"
-          echo "- \`cargo build --workspace --locked\`: passed" >> "$GITHUB_STEP_SUMMARY"
+          size_bytes=$(stat -c%s target/release/libswfr_libretro.so)
+          echo "libswfr_libretro.so size: ${size_bytes} bytes"
+          if [ "$size_bytes" -ge 6291456 ]; then
+            echo "ERROR: Core library size ${size_bytes} exceeds 6 MB budget" >&2
+            exit 1
+          fi
+          echo "### Core Library Build & Size Budget" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`libswfr_libretro.so\`: \`${size_bytes}\` bytes (budget: \`< 6,291,456\` bytes)" >> "$GITHUB_STEP_SUMMARY"
