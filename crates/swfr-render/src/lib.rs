@@ -13,9 +13,7 @@ use swfr_scene::{
     flatten_morph_shape, flatten_shape, ButtonState, Character, DecodedBitmap, DisplayObject,
     FlattenedShape, PathCmd, Stage,
 };
-use swfr_swf::{
-    ButtonDef, EditTextDef, FillStyle, FontDef, Rgba, ShapeDef, ShapeRecord, TextDef,
-};
+use swfr_swf::{ButtonDef, EditTextDef, FillStyle, FontDef, Rgba, ShapeDef, ShapeRecord, TextDef};
 use tiny_skia::{
     Color, FillRule, FilterQuality, GradientStop as SkiaStop, LineCap, LineJoin, LinearGradient,
     Mask, Paint, Path, PathBuilder, Pattern, Pixmap, Point, RadialGradient, SpreadMode, Stroke,
