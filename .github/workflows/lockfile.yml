@@ -49,7 +49,7 @@ jobs:
               printf '%s\n' "<!-- swfr-lockfile-diag -->"
               printf '%s\n' "### Cargo Build & Test Diagnostics (\`${GITHUB_SHA}\`)"
               printf '%s\n' '```text'
-              tail -n 160 /tmp/lockfile-diag.txt
+              grep -n -C 12 -E "^error(\[|:)|FAILED" /tmp/lockfile-diag.txt | head -n 160
               printf '%s\n' '```'
             } > /tmp/diag-comment.md
             gh api -X POST "repos/${GITHUB_REPOSITORY}/issues/1/comments" -F body=@/tmp/diag-comment.md >/dev/null || true

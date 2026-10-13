@@ -141,7 +141,7 @@ fn avm1_es3_conformance_160_generated_movies() {
                 "false".to_owned(),
                 "number".to_owned(),
                 "string".to_owned(),
-                (!(i > 10)).to_string(),
+                (i <= 10).to_string(),
             ],
         });
     }

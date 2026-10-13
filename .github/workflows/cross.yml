@@ -128,8 +128,6 @@ jobs:
           NDK_BIN="${ANDROID_NDK_LATEST_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
           UPPER_TARGET=$(echo "${{ matrix.target }}" | tr 'a-z-' 'A-Z_')
           export "CARGO_TARGET_${UPPER_TARGET}_LINKER=${NDK_BIN}/${{ matrix.clang_prefix }}"
-          export "CC_${{ matrix.target }}=${NDK_BIN}/${{ matrix.clang_prefix }}"
-          export "AR_${{ matrix.target }}=${NDK_BIN}/llvm-ar"
 
           cargo build --release -p swfr-libretro --target "${{ matrix.target }}"
           SO_PATH="target/${{ matrix.target }}/release/libswfr_libretro.so"
