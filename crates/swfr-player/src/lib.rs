@@ -1,7 +1,11 @@
-//! Frame-stepping SWF player coordinator integrating scene, VM, render, and audio.
-//!
-//! Implements the `Player` interface contract defined in TSD 2.6 and the resource
-//! limits table defined in TSD 2.11.
+//! Frame-stepping SWF player coordinator integrating `swfr-swf`, `swfr-scene`, `swfr-render`,
+//! `swfr-avm1`, and `swfr-audio` (TSD 2.6, 2.11, 2.12 M0–M5).
+
+use swfr_audio::AudioMixer;
+use swfr_avm1::Avm1;
+use swfr_render::Renderer;
+use swfr_scene::{FrameEvents, Stage};
+use swfr_swf::{Movie, Tag};
 
 /// Fixed output audio sample rate in Hz (TSD 2.5, 2.8).
 pub const SAMPLE_RATE_HZ: u32 = 44_100;
@@ -274,6 +278,15 @@ const COLOR_BARS_XRGB: [u32; 8] = [
     0x0000_0000,
 ];
 
+#[derive(Debug)]
+struct ActiveRuntime {
+    movie: Movie,
+    stage: Stage,
+    renderer: Renderer,
+    vm: Avm1,
+    audio: AudioMixer,
+}
+
 /// Frame-stepping SWF player instance (TSD 2.6).
 #[derive(Debug)]
 pub struct Player {
@@ -291,6 +304,7 @@ pub struct Player {
     frame: Frame,
     audio_buf: Vec<i16>,
     logs: Vec<LogLine>,
+    runtime: Option<ActiveRuntime>,
 }
 
 impl Player {
@@ -317,9 +331,9 @@ impl Player {
             });
         }
 
-        // Parse optional 8.8 fixed-point frame rate if a minimal FWS header with 1-byte RECT is supplied,
-        // or reject truncated FWS/CWS/ZWS headers shorter than 8 bytes.
         let mut fps_q8: u64 = 60 * 256;
+        let mut parsed_movie: Option<Movie> = None;
+
         if let Some(sig) = swf_bytes.get(0..3) {
             if sig == b"FWS" || sig == b"CWS" || sig == b"ZWS" {
                 if swf_bytes.len() < 8 {
@@ -333,11 +347,43 @@ impl Player {
                         fps_q8 = raw_q8.clamp(256, 120 * 256);
                     }
                 }
+                if let Ok(m) = Movie::parse(swf_bytes) {
+                    if m.header.frame_size.width_twips() > 0 && !m.tags.is_empty() {
+                        fps_q8 = u64::from(m.header.frame_rate_q8).clamp(256, 120 * 256);
+                        parsed_movie = Some(m);
+                    }
+                }
             }
         }
 
-        let stage_width = DEFAULT_STAGE_WIDTH;
-        let stage_height = DEFAULT_STAGE_HEIGHT;
+        let (stage_width, stage_height, runtime) = if let Some(movie) = parsed_movie {
+            let sw = movie.header.width_px();
+            let sh = movie.header.height_px();
+            let stage = Stage::from_movie(&movie);
+            let renderer = Renderer::new(sw, sh, opts.scale.factor().clamp(1, 2));
+            let mut vm = Avm1::new(movie.header.version);
+            vm.max_ops_per_run = u64::from(opts.script_timeout_secs).saturating_mul(250_000).max(10_000);
+            let mut audio = AudioMixer::new();
+            for tag in &movie.tags {
+                if let Tag::DefineSound(snd) = tag {
+                    audio.register_sound(snd);
+                }
+            }
+            (
+                sw,
+                sh,
+                Some(ActiveRuntime {
+                    movie,
+                    stage,
+                    renderer,
+                    vm,
+                    audio,
+                }),
+            )
+        } else {
+            (DEFAULT_STAGE_WIDTH, DEFAULT_STAGE_HEIGHT, None)
+        };
+
         let max_scale = Self::compute_max_scale(stage_width, stage_height);
         let effective_scale = opts.scale.factor().min(max_scale);
         let width = stage_width.saturating_mul(effective_scale);
@@ -345,7 +391,6 @@ impl Player {
         let pixel_count = usize::try_from(width.saturating_mul(height)).unwrap_or(0);
 
         let fps = (fps_q8 as f64) / 256.0;
-        // Pre-allocate stereo buffer for the lowest allowed frame rate (1 fps = 44,100 stereo frames = 88,200 i16 samples).
         let max_samples_per_frame = (SAMPLE_RATE_HZ as usize).saturating_mul(2);
 
         let mut player = Self {
@@ -367,8 +412,11 @@ impl Player {
             },
             audio_buf: Vec::with_capacity(max_samples_per_frame),
             logs: Vec::new(),
+            runtime,
         };
-        player.render_color_bars();
+        if player.runtime.is_none() {
+            player.render_color_bars();
+        }
         Ok(player)
     }
 
@@ -403,6 +451,11 @@ impl Player {
         let new_scale = opts.scale.factor().min(self.max_scale);
         let geometry_changed = new_scale != self.effective_scale;
         self.options = opts.clone();
+        if let Some(ref mut rt) = self.runtime {
+            rt.vm.max_ops_per_run = u64::from(opts.script_timeout_secs)
+                .saturating_mul(250_000)
+                .max(10_000);
+        }
         if geometry_changed {
             self.effective_scale = new_scale;
             let width = self.stage_width.saturating_mul(self.effective_scale);
@@ -411,7 +464,11 @@ impl Player {
             self.frame.width = width;
             self.frame.height = height;
             self.frame.xrgb.resize(pixel_count, 0);
-            self.render_color_bars();
+            if let Some(ref mut rt) = self.runtime {
+                rt.stage.full_redraw = true;
+            } else {
+                self.render_color_bars();
+            }
         }
         geometry_changed
     }
@@ -430,23 +487,85 @@ impl Player {
 
     /// Advances the player by one frame and produces video, stereo audio, and logs (TSD 2.6).
     #[allow(clippy::arithmetic_side_effects)]
-    pub fn run_frame(&mut self, _input: &Input) -> FrameOut<'_> {
+    pub fn run_frame(&mut self, input: &Input) -> FrameOut<'_> {
         self.logs.clear();
         self.frame_count = self.frame_count.saturating_add(1);
 
-        // Compute exact stereo sample frames for this video frame using 8.8 fixed-point carry (TSD 2.5).
         let numerator = self
             .audio_rem_q8
             .saturating_add(u64::from(SAMPLE_RATE_HZ).saturating_mul(256));
         let stereo_frames_u64 = numerator.checked_div(self.fps_q8).unwrap_or(735);
         self.audio_rem_q8 = numerator.checked_rem(self.fps_q8).unwrap_or(0);
-
         let stereo_frames = usize::try_from(stereo_frames_u64).unwrap_or(735);
+
+        if let Some(ref mut rt) = self.runtime {
+            // 1. Deliver keyboard input to AVM1
+            for kev in &input.keys {
+                rt.vm.set_key_state(kev.keycode, kev.down);
+            }
+
+            // 2. Deliver pointer input to Stage and execute any triggered button actions
+            if let Some((px, py)) = input.pointer {
+                let x_twips = (px * 20.0).round() as i32;
+                let y_twips = (py * 20.0).round() as i32;
+                let pressed = (input.buttons & 1) != 0;
+                let btn_events = rt.stage.update_pointer(x_twips, y_twips, pressed);
+                Self::dispatch_events(
+                    btn_events,
+                    &mut rt.stage,
+                    &mut rt.vm,
+                    &mut rt.audio,
+                    stereo_frames,
+                    self.options.trace_to_log,
+                    &mut self.logs,
+                );
+            }
+
+            // 3. Advance timeline by 1 frame and execute frame actions + sound tags
+            let frame_events = rt.stage.step_frame();
+            Self::dispatch_events(
+                frame_events,
+                &mut rt.stage,
+                &mut rt.vm,
+                &mut rt.audio,
+                stereo_frames,
+                self.options.trace_to_log,
+                &mut self.logs,
+            );
+
+            // 4. Advance deterministic timers
+            let delta_ms = (1000.0 / self.fps.max(1.0)).round() as u64;
+            rt.vm.step_timers(&mut rt.stage, delta_ms);
+            Self::drain_vm_logs(
+                &mut rt.vm,
+                &mut rt.audio,
+                self.options.trace_to_log,
+                &mut self.logs,
+            );
+
+            // 5. Render stage at effective scale
+            let render_scale = self.effective_scale.clamp(1, 2);
+            let _ = rt.renderer.render_stage(&mut rt.stage, render_scale);
+            self.frame.width = rt.renderer.width();
+            self.frame.height = rt.renderer.height();
+            self.frame.xrgb.clear();
+            self.frame.xrgb.extend_from_slice(rt.renderer.xrgb8888());
+
+            // 6. Mix 44.1 kHz stereo audio for this frame
+            self.audio_buf = rt.audio.mix_interleaved(stereo_frames);
+
+            return FrameOut {
+                video: Some(&self.frame),
+                audio: &self.audio_buf,
+                logs: &self.logs,
+            };
+        }
+
+        // Stub fallback (SMPTE color bars + 440 Hz sine tone)
         let sample_len = stereo_frames.saturating_mul(2);
         self.audio_buf.clear();
         self.audio_buf.resize(sample_len, 0);
 
-        // Generate a continuous 440 Hz sine tone in stereo signed 16-bit PCM (TSD 2.12 M0).
         let two_pi_440 = core::f64::consts::TAU * 440.0 / f64::from(SAMPLE_RATE_HZ);
         for frame_idx in 0..stereo_frames {
             let phase = (self.tone_sample_idx as f64) * two_pi_440;
@@ -474,7 +593,75 @@ impl Player {
         self.tone_sample_idx = 0;
         self.frame_count = 0;
         self.logs.clear();
-        self.render_color_bars();
+        if let Some(ref mut rt) = self.runtime {
+            rt.stage = Stage::from_movie(&rt.movie);
+            rt.vm = Avm1::new(rt.movie.header.version);
+            rt.vm.max_ops_per_run = u64::from(self.options.script_timeout_secs)
+                .saturating_mul(250_000)
+                .max(10_000);
+            rt.audio = AudioMixer::new();
+            for tag in &rt.movie.tags {
+                if let Tag::DefineSound(snd) = tag {
+                    rt.audio.register_sound(snd);
+                }
+            }
+        } else {
+            self.render_color_bars();
+        }
+    }
+
+    fn dispatch_events(
+        events: FrameEvents,
+        stage: &mut Stage,
+        vm: &mut Avm1,
+        audio: &mut AudioMixer,
+        stereo_frames: usize,
+        trace_to_log: bool,
+        logs: &mut Vec<LogLine>,
+    ) {
+        for head in events.stream_heads {
+            audio.set_stream_head(head);
+        }
+        for block in events.stream_blocks {
+            audio.push_stream_block(&block, stereo_frames);
+        }
+        for (sid, info) in events.start_sounds {
+            audio.start_sound(sid, &info);
+        }
+        for (_, code) in events.actions {
+            vm.execute_bytecode(&code, stage);
+            Self::drain_vm_logs(vm, audio, trace_to_log, logs);
+        }
+    }
+
+    fn drain_vm_logs(
+        vm: &mut Avm1,
+        audio: &mut AudioMixer,
+        trace_to_log: bool,
+        logs: &mut Vec<LogLine>,
+    ) {
+        if trace_to_log {
+            for t in vm.trace_log.drain(..) {
+                logs.push(LogLine {
+                    level: LogLevel::Info,
+                    message: format!("[trace] {t}"),
+                });
+            }
+        } else {
+            vm.trace_log.clear();
+        }
+        if vm.watchdog_tripped {
+            vm.watchdog_tripped = false;
+            logs.push(LogLine {
+                level: LogLevel::Warn,
+                message: "AVM1 instruction watchdog tripped; aborting action block".to_owned(),
+            });
+        }
+        audio.volume_percent = vm.sound_volume;
+        if vm.stop_sounds_requested {
+            vm.stop_sounds_requested = false;
+            audio.stop_all_sounds();
+        }
     }
 
     fn compute_max_scale(stage_width: u32, stage_height: u32) -> u32 {
@@ -518,6 +705,7 @@ impl Player {
 )]
 mod tests {
     use super::*;
+    use swfr_testkit::{ActionBuilder, SwfBuilder};
 
     #[test]
     fn stub_player_renders_320x240_color_bars_and_440hz_tone() {
@@ -536,17 +724,14 @@ mod tests {
         assert_eq!(video.width, 320);
         assert_eq!(video.height, 240);
         assert_eq!(video.xrgb.len(), 320 * 240);
-        // First pixel is White (0x00FFFFFF), last pixel is Black (0x00000000).
         assert_eq!(video.xrgb.first().copied(), Some(0x00FF_FFFF));
         assert_eq!(video.xrgb.last().copied(), Some(0x0000_0000));
-        // At 60 fps, 44100 / 60 = 735 stereo frames = 1470 i16 samples.
         assert_eq!(out.audio.len(), 735 * 2);
         assert!(out.audio.iter().any(|&s| s != 0));
     }
 
     #[test]
     fn fractional_audio_carry_600_runs_at_12fps_equals_2205000_frames() {
-        // Minimal FWS header with 1-byte RECT (0x00) and 8.8 fixed-point fps = 12.0 (0x0c00).
         let swf_12fps = b"FWS\x08\x0d\x00\x00\x00\x00\x00\x0c\x01\x00";
         let mut player =
             Player::new(swf_12fps, None, &Options::default()).unwrap_or_else(|_| unreachable!());
@@ -559,5 +744,32 @@ mod tests {
             total_stereo_frames = total_stereo_frames.saturating_add(out.audio.len() / 2);
         }
         assert_eq!(total_stereo_frames, 2_205_000);
+    }
+
+    #[test]
+    fn end_to_end_swf_movie_executes_scene_render_avm1_and_audio() {
+        let mut ab = ActionBuilder::new();
+        ab.push_str("hello_from_player").trace();
+        let mut b = SwfBuilder::new(8, 128, 96, 60.0, 1);
+        b.push_tag(&Tag::SetBackgroundColor {
+            r: 0x33,
+            g: 0x66,
+            b: 0x99,
+        });
+        b.push_tag(&Tag::DoAction {
+            actions: ab.build(),
+        });
+        b.push_tag(&Tag::ShowFrame);
+        let swf_bytes = b.build();
+
+        let mut player = Player::new(&swf_bytes, None, &Options::default()).unwrap();
+        assert_eq!(player.av_info().width, 128);
+        assert_eq!(player.av_info().height, 96);
+
+        let out = player.run_frame(&Input::default());
+        let v = out.video.unwrap();
+        assert_eq!(v.xrgb[0], 0x0033_6699);
+        assert_eq!(out.logs.len(), 1);
+        assert_eq!(out.logs[0].message, "[trace] hello_from_player");
     }
 }

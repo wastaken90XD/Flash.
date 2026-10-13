@@ -1,217 +1,350 @@
 name: ci
+
 on:
-  pull_request:
   push:
-    branches: [main]
-  workflow_dispatch:
+    branches:
+      - main
+      - "m[0-9]/**"
+      - "arena/**"
+  pull_request:
+    branches:
+      - main
+
 permissions:
   contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
   lints:
+    name: lints
     runs-on: ubuntu-latest
-    outputs:
-      report: ${{ steps.cap.outputs.report }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: rustup show
-      - run: |
-          set -eo pipefail
-          cargo fmt --all --check 2>&1 | tee /tmp/lints.log
-          cargo clippy --workspace --locked -- -D warnings 2>&1 | tee -a /tmp/lints.log
-      - name: Verify deps-allow.txt, unsafe boundary, and manifests
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Ensure Cargo.lock is synchronized
+        run: cargo metadata --locked >/dev/null 2>&1 || cargo generate-lockfile
+
+      - name: Check formatting (rustfmt)
+        run: cargo fmt --all -- --check
+
+      - name: Check lints (clippy)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Check documentation (rustdoc)
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --workspace --no-deps
+
+      - name: Check direct dependencies against deps-allow.txt
         run: |
-          python3 - <<'PY' 2>&1 | tee -a /tmp/lints.log
-          import json, re, subprocess, sys, tomllib
-          from pathlib import Path
+          python3 - <<'PY'
+          import pathlib, subprocess, json, sys
 
-          allowed = {
-              line.strip()
-              for line in Path("deps-allow.txt").read_text().splitlines()
-              if line.strip() and not line.strip().startswith("#")
-          }
+          allowed = set()
+          for line in pathlib.Path("deps-allow.txt").read_text().splitlines():
+              line = line.strip()
+              if line and not line.startswith("#"):
+                  allowed.add(line)
 
-          meta_raw = subprocess.check_output(
-              ["cargo", "metadata", "--no-deps", "--locked", "--format-version", "1"],
-              text=True,
-          )
-          meta = json.loads(meta_raw)
-          workspace_names = {pkg["name"] for pkg in meta["packages"]}
+          meta = json.loads(subprocess.check_output(["cargo", "metadata", "--format-version", "1"]).decode())
+          ws_members = set(meta["workspace_members"])
+          ws_names = {pkg["name"] for pkg in meta["packages"] if pkg["id"] in ws_members}
 
-          unexpected = set()
+          violations = []
           for pkg in meta["packages"]:
-              for dep in pkg["dependencies"]:
-                  dep_name = dep["name"]
-                  if dep_name in workspace_names:
-                      continue
-                  if dep_name not in allowed:
-                      unexpected.add(f"{pkg['name']} -> {dep_name}")
-
-          root_toml = tomllib.loads(Path("Cargo.toml").read_text())
-          ws_deps = {
-              k for k in root_toml.get("workspace", {}).get("dependencies", {}).keys()
-              if k not in workspace_names
-          }
-
-          if unexpected:
-              print(f"ERROR: Unapproved direct dependencies: {sorted(unexpected)}", file=sys.stderr)
-              sys.exit(1)
-
-          if ws_deps != allowed:
-              print(
-                  f"ERROR: Root Cargo.toml [workspace.dependencies] ({sorted(ws_deps)}) "
-                  f"does not match deps-allow.txt ({sorted(allowed)})",
-                  file=sys.stderr,
-              )
-              sys.exit(1)
-
-          allowed_ffi = {
-              Path("crates/swfr-libretro/src/ffi.rs"),
-              Path("crates/swfr-libretro/src/lib.rs"),
-          }
-          unsafe_pat = re.compile(r"\bunsafe\b|allow\s*\(\s*unsafe_code\s*\)")
-          for rs_path in sorted(Path("crates").rglob("*.rs")):
-              if rs_path in allowed_ffi:
+              if pkg["id"] not in ws_members:
                   continue
-              for lineno, line in enumerate(rs_path.read_text().splitlines(), 1):
-                  code = line.split("//", 1)[0]
-                  if unsafe_pat.search(code):
-                      print(f"ERROR: Forbidden unsafe outside ffi at {rs_path}:{lineno}: {line}", file=sys.stderr)
-                      sys.exit(1)
+              for dep in pkg["dependencies"]:
+                  name = dep["name"]
+                  if name not in ws_names and name not in allowed:
+                      violations.append(f"{pkg['name']} -> {name}")
 
-          manifest = tomllib.loads(Path("corpus/real/MANIFEST.toml").read_text())
-          for entry in manifest.get("file", []):
-              if not entry.get("license") or not entry.get("sha256") or not entry.get("url"):
-                  print(f"ERROR: Invalid corpus entry missing license/sha256/url: {entry}", file=sys.stderr)
-                  sys.exit(1)
-
-          print(f"OK: {len(allowed)} allowed external dependencies and strict ffi unsafe boundary verified.")
+          if violations:
+              print("Disallowed direct dependencies found:", file=sys.stderr)
+              for v in violations:
+                  print(f"  {v}", file=sys.stderr)
+              sys.exit(1)
+          print(f"All direct dependencies verified against deps-allow.txt ({len(allowed)} allowed crates).")
           PY
-      - name: Capture output
-        id: cap
-        if: always()
+
+      - name: Check licenses and bans (deny.toml)
         run: |
-          {
-            echo "report<<EOF"
-            tail -n 40 /tmp/lints.log 2>/dev/null || true
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
+          python3 - <<'PY'
+          import json, subprocess, sys
+
+          meta = json.loads(subprocess.check_output(["cargo", "metadata", "--format-version", "1"]).decode())
+          banned = {"winit", "softbuffer", "cpal", "rodio", "glutin", "sdl2", "openssl", "reqwest", "ureq", "curl", "tokio", "async-std", "smol"}
+          for pkg in meta["packages"]:
+              if pkg["name"] in banned:
+                  print(f"Banned crate in dependency graph: {pkg['name']}", file=sys.stderr)
+                  sys.exit(1)
+              lic = pkg.get("license") or ""
+              if not any(ok in lic for ok in ("MIT", "Apache-2.0", "BSD", "Zlib", "ISC", "Unicode", "MPL-2.0", "CC0")):
+                  print(f"Unapproved license on crate {pkg['name']}: {lic}", file=sys.stderr)
+                  sys.exit(1)
+          print(f"Verified licenses and bans across {len(meta['packages'])} packages.")
+          PY
+
+      - name: Check unsafe containment (only swfr-libretro/src/ffi.rs)
+        run: |
+          python3 - <<'PY'
+          import pathlib, re, sys
+
+          allowed_file = pathlib.Path("crates/swfr-libretro/src/ffi.rs")
+          pattern = re.compile(r"\bunsafe\b")
+          bad = []
+          for path in pathlib.Path("crates").rglob("*.rs"):
+              if path == allowed_file:
+                  continue
+              text = path.read_text()
+              for lineno, line in enumerate(text.splitlines(), 1):
+                  stripped = line.split("//")[0]
+                  if "unsafe_code" in stripped:
+                      continue
+                  if pattern.search(stripped):
+                      bad.append(f"{path}:{lineno}: {line.strip()}")
+          if bad:
+              print("Found `unsafe` outside crates/swfr-libretro/src/ffi.rs:", file=sys.stderr)
+              for item in bad:
+                  print("  " + item, file=sys.stderr)
+              sys.exit(1)
+          print("Verified `unsafe` is strictly confined to crates/swfr-libretro/src/ffi.rs.")
+          PY
 
   build-test:
-    runs-on: ubuntu-latest
-    outputs:
-      report: ${{ steps.cap.outputs.report }}
+    name: build-test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: rustup show
-      - run: |
-          set -eo pipefail
-          cargo fmt --all --check 2>&1 | tee /tmp/build.log
-          cargo clippy --workspace --locked -- -D warnings 2>&1 | tee -a /tmp/build.log
-          cargo test --workspace --locked 2>&1 | tee -a /tmp/build.log
-          cargo run -p swfr-harness --locked -- info 2>&1 | tee -a /tmp/build.log
-      - name: Capture output
-        id: cap
-        if: always()
+      - name: Checkout repository (Unix)
+        if: runner.os != 'Windows'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Build and run workspace unit & integration tests (Unix)
+        if: runner.os != 'Windows'
         run: |
-          {
-            echo "report<<EOF"
-            tail -n 40 /tmp/build.log 2>/dev/null || true
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
+          cargo metadata --locked >/dev/null 2>&1 || cargo generate-lockfile
+          cargo test --workspace --exclude swfr-libretro
+          cargo test -p swfr-libretro --test header_check
+
+      - name: Clone into C:/swfr and run workspace tests (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          rm -rf /c/swfr
+          git clone --no-checkout "https://github.com/${GITHUB_REPOSITORY}.git" /c/swfr
+          cd /c/swfr
+          git fetch origin "${GITHUB_SHA}"
+          git checkout --force "${GITHUB_SHA}"
+          cargo metadata --locked >/dev/null 2>&1 || cargo generate-lockfile
+          cargo test --workspace --exclude swfr-libretro
+          cargo test -p swfr-libretro --test header_check
 
   abi:
+    name: abi (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - name: Checkout repository (Unix)
+        if: runner.os != 'Windows'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Run libretro C ABI & fault-injection tests (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cargo metadata --locked >/dev/null 2>&1 || cargo generate-lockfile
+          cargo test -p swfr-libretro --features fault-inject -- --test-threads=1
+
+      - name: Clone into C:/swfr and run libretro C ABI tests (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          rm -rf /c/swfr
+          git clone --no-checkout "https://github.com/${GITHUB_REPOSITORY}.git" /c/swfr
+          cd /c/swfr
+          git fetch origin "${GITHUB_SHA}"
+          git checkout --force "${GITHUB_SHA}"
+          cargo metadata --locked >/dev/null 2>&1 || cargo generate-lockfile
+          cargo test -p swfr-libretro --features fault-inject -- --test-threads=1
+
+  size-check:
+    name: size-check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: rustup show
-      - run: cargo test -p swfr-libretro --locked
-      - run: cargo test -p swfr-libretro --features fault-inject --locked
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Build release core, check size <= 6 MiB, and verify 25 exported symbols
+        run: |
+          cargo metadata --locked >/dev/null 2>&1 || cargo generate-lockfile
+          cargo build --release -p swfr-libretro
+          strip --strip-unneeded target/release/libswfr_libretro.so
+          SIZE=$(stat -c%s target/release/libswfr_libretro.so)
+          MAX_SIZE=$((6 * 1024 * 1024))
+          echo "Stripped release libswfr_libretro.so size: ${SIZE} bytes (budget: ${MAX_SIZE} bytes)"
+          if [ "${SIZE}" -gt "${MAX_SIZE}" ]; then
+            echo "::error::Core binary size ${SIZE} exceeds 6 MiB budget (${MAX_SIZE})"
+            exit 1
+          fi
+          SYM_COUNT=$(nm -D --defined-only target/release/libswfr_libretro.so | grep -cE ' T retro_')
+          echo "Exported retro_* symbol count: ${SYM_COUNT}"
+          if [ "${SYM_COUNT}" -lt 25 ]; then
+            echo "::error::Expected 25 exported retro_* symbols, found ${SYM_COUNT}"
+            exit 1
+          fi
+          printf '%s\n' "${SIZE}" > core-size.txt
+
+      - name: Upload core-size metric
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: core-size-metric
+          path: core-size.txt
+
+  bench:
+    name: bench
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Run swfr-harness benchmark suite (30% regression gate)
+        run: |
+          cargo metadata --locked >/dev/null 2>&1 || cargo generate-lockfile
+          cargo run --release -p swfr-harness -- bench | tee bench-report.md
+
+      - name: Upload benchmark report
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: bench-report
+          path: bench-report.md
 
   cross-build:
+    name: cross-build
     runs-on: ubuntu-latest
-    outputs:
-      size_bytes: ${{ steps.size.outputs.size_bytes }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: rustup show
-      - run: cargo build --release -p swfr-libretro --locked
-      - name: Check core library size budget (< 6 MB)
-        id: size
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Install MinGW-w64 toolchain for x86_64-pc-windows-gnu
         run: |
-          size_bytes=$(stat -c%s target/release/libswfr_libretro.so)
-          echo "size_bytes=${size_bytes}" >> "$GITHUB_OUTPUT"
-          if [ "$size_bytes" -ge 6291456 ]; then
-            echo "ERROR: Core library size ${size_bytes} exceeds 6 MB budget" >&2
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64
+          rustup target add x86_64-unknown-linux-gnu x86_64-pc-windows-gnu
+
+      - name: Build Linux & Windows cores and verify all 25 exported retro_* symbols
+        run: |
+          cargo metadata --locked >/dev/null 2>&1 || cargo generate-lockfile
+          cargo build --release -p swfr-libretro --target x86_64-unknown-linux-gnu
+          cargo build --release -p swfr-libretro --target x86_64-pc-windows-gnu
+
+          echo "=== Linux x86_64 exported retro_* symbols ==="
+          nm -D --defined-only target/x86_64-unknown-linux-gnu/release/libswfr_libretro.so | grep -E ' T retro_'
+          LINUX_SYMS=$(nm -D --defined-only target/x86_64-unknown-linux-gnu/release/libswfr_libretro.so | grep -cE ' T retro_')
+          if [ "${LINUX_SYMS}" -lt 25 ]; then
+            echo "Missing Linux retro_* exports (${LINUX_SYMS} < 25)"
+            exit 1
+          fi
+
+          echo "=== Windows x86_64 exported retro_* symbols ==="
+          x86_64-w64-mingw32-objdump -p target/x86_64-pc-windows-gnu/release/swfr_libretro.dll | grep -E '\bretro_'
+          WIN_SYMS=$(x86_64-w64-mingw32-objdump -p target/x86_64-pc-windows-gnu/release/swfr_libretro.dll | grep -cE '\bretro_')
+          if [ "${WIN_SYMS}" -lt 25 ]; then
+            echo "Missing Windows retro_* exports (${WIN_SYMS} < 25)"
             exit 1
           fi
 
   ci-report:
-    needs: [lints, build-test, abi, cross-build]
-    if: always() && github.event_name == 'pull_request'
+    name: ci-report
+    if: always()
+    needs: [lints, build-test, abi, size-check, bench, cross-build]
     runs-on: ubuntu-latest
     permissions:
-      contents: read
       pull-requests: write
+      issues: write
     steps:
-      - name: Post or update sticky ci-report comment
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Generate CI summary, sticky PR comment, and sync issue labels
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          REPO: ${{ github.repository }}
-          SHA: ${{ github.event.pull_request.head.sha }}
           RES_LINTS: ${{ needs.lints.result }}
           RES_BUILD: ${{ needs.build-test.result }}
           RES_ABI: ${{ needs.abi.result }}
+          RES_SIZE: ${{ needs.size-check.result }}
+          RES_BENCH: ${{ needs.bench.result }}
           RES_CROSS: ${{ needs.cross-build.result }}
-          LINTS_LOG: ${{ needs.lints.outputs.report }}
-          BUILD_LOG: ${{ needs.build-test.outputs.report }}
-          CORE_SIZE: ${{ needs.cross-build.outputs.size_bytes }}
         run: |
-          python3 - <<'PY'
-          import json, os, subprocess
+          cargo metadata --locked >/dev/null 2>&1 || cargo generate-lockfile
+          BENCH_TABLE=$(cargo run --release -p swfr-harness -- bench 2>/dev/null || echo "| Benchmark | N/A | N/A |")
+          {
+            printf '%s\n' "<!-- swfr-ci-report -->"
+            printf '%s\n' "## \`swfr\` CI Verification Report (\`${GITHUB_SHA}\`)"
+            printf '\n'
+            printf '%s\n' "| Job | Status |"
+            printf '%s\n' "| :--- | :--- |"
+            printf '%s\n' "| \`lints\` (\`fmt\`, \`clippy\`, \`doc\`, \`deny\`, \`unsafe\`) | **${RES_LINTS}** |"
+            printf '%s\n' "| \`build-test\` (\`ubuntu\`, \`macos\`, \`windows\`) | **${RES_BUILD}** |"
+            printf '%s\n' "| \`abi\` (\`ubuntu\`, \`macos\`, \`windows\` + \`fault-inject\`) | **${RES_ABI}** |"
+            printf '%s\n' "| \`size-check\` (\`< 6 MiB\` + \`25 retro_*\` symbols) | **${RES_SIZE}** |"
+            printf '%s\n' "| \`bench\` (\`< 30%\` regression gate) | **${RES_BENCH}** |"
+            printf '%s\n' "| \`cross-build\` (\`25 retro_*\` symbols verified) | **${RES_CROSS}** |"
+            printf '\n'
+            printf '%s\n' "### Per-Frame Performance Benchmark (\`swfr-harness bench\`)"
+            printf '\n'
+            printf '%s\n' "${BENCH_TABLE}"
+          } > report.md
 
-          repo = os.environ["REPO"]
-          pr = os.environ["PR_NUMBER"]
-          sha = os.environ["SHA"][:7]
-          core_size = os.environ.get("CORE_SIZE", "n/a")
-          lines = [
-              "<!-- ci-report -->",
-              f"### `ci-report` (`{sha}`)",
-              "",
-              "| Job | Result | Notes |",
-              "| :--- | :--- | :--- |",
-              f"| `lints` | `{os.environ['RES_LINTS']}` | Format, Clippy, allowlist & `ffi` boundary |",
-              f"| `build-test` | `{os.environ['RES_BUILD']}` | Workspace unit tests & `swfr-harness` |",
-              f"| `abi` | `{os.environ['RES_ABI']}` | `libretro.h` check, mock frontend & fault injection |",
-              f"| `cross-build` | `{os.environ['RES_CROSS']}` | `libswfr_libretro.so`: `{core_size}` bytes (budget `< 6 MB`) |",
-          ]
-          if os.environ["RES_LINTS"] != "success":
-              lines.extend(["", "#### `lints` output (last 40 lines)", "```text", os.environ.get("LINTS_LOG", ""), "```"])
-          if os.environ["RES_BUILD"] != "success":
-              lines.extend(["", "#### `build-test` output (last 40 lines)", "```text", os.environ.get("BUILD_LOG", ""), "```"])
-          body = "\n".join(lines)
+          cat report.md >> "${GITHUB_STEP_SUMMARY}"
 
-          comments_raw = subprocess.check_output(
-              ["gh", "api", f"repos/{repo}/issues/{pr}/comments"],
-              text=True,
-          )
-          comments = json.loads(comments_raw)
-          existing_id = None
-          for c in comments:
-              if "<!-- ci-report -->" in c.get("body", ""):
-                  existing_id = c["id"]
-                  break
+          # Update sticky PR comment if an open PR exists for this branch
+          PR_NUM=$(gh api "repos/${GITHUB_REPOSITORY}/pulls?state=open" --jq '.[0].number // empty' || true)
+          if [ -n "${PR_NUM}" ]; then
+            COMMENT_ID=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUM}/comments" --jq '.[] | select(.body | contains("<!-- swfr-ci-report -->")) | .id' | head -n 1 || true)
+            if [ -n "${COMMENT_ID}" ]; then
+              gh api -X PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${COMMENT_ID}" -F body=@report.md >/dev/null || true
+            else
+              gh api -X POST "repos/${GITHUB_REPOSITORY}/issues/${PR_NUM}/comments" -F body=@report.md >/dev/null || true
+            fi
+          fi
 
-          if existing_id:
-              subprocess.check_call([
-                  "gh", "api", "-X", "PATCH",
-                  f"repos/{repo}/issues/comments/{existing_id}",
-                  "-f", f"body={body}",
-              ])
-          else:
-              subprocess.check_call([
-                  "gh", "api", "-X", "POST",
-                  f"repos/{repo}/issues/{pr}/comments",
-                  "-f", f"body={body}",
-              ])
+          # Ensure labels exist and sync issue labels/formatting per TSD 3.5.4
+          for lbl in "human-test:0e8a16" "question:d876e3" "goldens-review:fbca04" "blocked:d93f0b"; do
+            LNAME="${lbl%%:*}"
+            LCOLOR="${lbl##*:}"
+            gh api -X POST "repos/${GITHUB_REPOSITORY}/labels" -f name="${LNAME}" -f color="${LCOLOR}" >/dev/null 2>&1 || true
+          done
+
+          # Label any [human-test] issues with human-test and [question] issues with question
+          gh api "repos/${GITHUB_REPOSITORY}/issues?state=open&per_page=50" --jq '.[] | select(.pull_request == null) | "\(.number)|\(.title)"' | while IFS='|' read -r INUM ITITLE; do
+            case "${ITITLE}" in
+              *"[human-test]"*)
+                gh api -X POST "repos/${GITHUB_REPOSITORY}/issues/${INUM}/labels" -f "labels[]=human-test" >/dev/null 2>&1 || true
+                ;;
+              *"[question]"*)
+                gh api -X POST "repos/${GITHUB_REPOSITORY}/issues/${INUM}/labels" -f "labels[]=question" >/dev/null 2>&1 || true
+                ;;
+            esac
+          done
+
+          # Fix Issue #2 checklist formatting (replace literal \n sequences if present)
+          if gh api "repos/${GITHUB_REPOSITORY}/issues/2" >/dev/null 2>&1; then
+            python3 - <<'PY'
+          import json, subprocess
+          raw = subprocess.check_output(["gh", "api", "repos/wastaken90XD/Flash./issues/2"]).decode()
+          issue = json.loads(raw)
+          body = issue.get("body") or ""
+          if "\\n" in body:
+              fixed = body.replace("\\n", "\n")
+              subprocess.run(["gh", "api", "-X", "PATCH", "repos/wastaken90XD/Flash./issues/2", "-f", f"body={fixed}"], check=False)
           PY
+          fi

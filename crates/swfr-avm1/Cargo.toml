@@ -6,8 +6,12 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+swfr-reader.workspace = true
 swfr-scene.workspace = true
 swfr-swf.workspace = true
+
+[dev-dependencies]
+swfr-testkit.workspace = true
 
 [lints]
 workspace = true

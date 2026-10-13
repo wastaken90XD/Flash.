@@ -62,3 +62,38 @@ Player::reset(&mut self)
 - **M5:** Audio (PCM, ADPCM, MP3 via `symphonia`, resampler, mixer).
 - **M6:** Packaging and platform verification (`release.yml`, V5–V7).
 - **M7:** AVM2 (ActionScript 3).
+
+---
+
+## Part 3: Autonomous completion directive (for the AI)
+
+Where Part 3 conflicts with Part 2, **Part 3 wins** for the duration of this autonomous run.
+
+### 3.1 Definition of done
+1. Every required CI job on `main` (and the active session branch) is green.
+2. Milestones **M1 through M6** are implemented as specified in 2.12, with the substitutions in 3.6 where an exit criterion in 2.12 depends on owner hardware or owner approval.
+3. `cross.yml` builds the core for **every target in 2.4** (Linux `x86_64`, `x86`, `armv7`, `aarch64`; Android `armv7`, `thumbv7neon`, `aarch64`; Windows `x86_64`, `x86` GNU and MSVC; macOS `arm64`, `x86_64`; iOS `arm64` build-only).
+4. `release.yml` produces a draft release (or workflow artifact) with one zip per platform containing the library, `.info`, `README.md`, and licenses.
+5. Every tag in the SWF specification v19 either has a builder round-trip test or is listed in `docs/notes/tag-coverage.md` with the reason it is unsupported.
+6. The AS1/AS2 conformance suite (M4) has at least 150 generated movies with expected logs derived from ES3 semantics, all passing.
+7. Audio tests (M5, including the marker-pulse stream sync test) and rendering tests (M2, M3) pass against approved or provisional goldens (see 3.7).
+8. Release core size is under 6 MB and `bench` shows no regression above 30%.
+9. `README.md`, `docs/INSTALL.md`, and `docs/KNOWN_LIMITATIONS.md` exist and match the code.
+10. All `human-test` issues (V1 through V7) are open with artifact links ready for the owner to run when they return, and a final summary issue titled `v1 engineering-complete report` is open with the checklist from 3.1 and links to every piece of evidence.
+
+### 3.5 Task 0: Fix M0 audit gaps
+1. Add a `cross-build` step that lists exported `retro_*` symbols (`nm -D` on Linux, `llvm-nm` or `dumpbin` on other platforms) and fails the job unless all 25 symbols in 2.5 are present.
+2. Pin every action by commit SHA.
+3. Fix the `ci-report` table rendering and include every job.
+4. Apply the `human-test` label to Issue #2 and fix its checklist formatting.
+5. Add the missing `windows-latest` and `macos-latest` matrix entries for `build-test` and `abi`, and the native Windows MSVC build.
+6. Mark `docs/platform-notes.md` as unverified.
+7. Report any environment constraint in a `question` issue.
+
+### 3.6–3.13 Milestone Exit Criteria Substitutions, Provisional Goldens, Audits, and Heartbeat
+- **M1:** Tag coverage table in `docs/notes/tag-coverage.md`; 100k-iteration deterministic mutator test.
+- **M2:** Provisional goldens in `crates/swfr-render/tests/golden-provisional/` + `GOLDENS.md`; open V2 `human-test` issue.
+- **M3:** ABI tests for `retro_input_state_t` (`JOYPAD`, `ANALOG`, `MOUSE`, `POINTER`), keyboard callback, and live `swfr_scale` `SET_GEOMETRY`; open V3 and V4 `human-test` issues.
+- **M4:** Benchmark flat `match` vs decoded `Vec<Op>` in `DECISIONS.md`; >= 150 generated ES3 conformance movies in `crates/swfr-avm1/tests/conformance.rs`; open V5 `human-test` issue.
+- **M5:** PCM, ADPCM, MP3, resampler, and 300-frame marker-pulse stream sync test; open V6 `human-test` issue.
+- **M6:** Full `cross.yml` matrix (including QEMU user-mode ABI test on `armv7`), `release.yml`, `bench` per-frame cost in `ci-report`, `README.md`, `docs/INSTALL.md`, `docs/KNOWN_LIMITATIONS.md`, open V7 `human-test` issue and `v1 engineering-complete report` issue.

@@ -9,9 +9,13 @@ rust-version.workspace = true
 swfr-audio.workspace = true
 swfr-avm1.workspace = true
 swfr-avm2.workspace = true
+swfr-reader.workspace = true
 swfr-render.workspace = true
 swfr-scene.workspace = true
 swfr-swf.workspace = true
+
+[dev-dependencies]
+swfr-testkit.workspace = true
 
 [lints]
 workspace = true

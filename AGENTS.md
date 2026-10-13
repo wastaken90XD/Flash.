@@ -1,4 +1,4 @@
-# AGENTS.md — Rules for the Implementing AI (TSD 2.16)
+# AGENTS.md — Rules for the Implementing AI (TSD 2.16 & Part 3)
 
 Read this file first, then `STATUS.md`, then only the current milestone's section in `docs/TSD.md`.
 
@@ -30,3 +30,43 @@ Changes to the following paths require review and approval from `@wastaken90XD`:
 - `/references.lock`
 - `/corpus/real/MANIFEST.toml`
 - `/.github/`
+
+---
+
+## Part 3: Autonomous completion directive (for the AI)
+
+Where Part 3 conflicts with Part 2, **Part 3 wins** for the duration of this autonomous run.
+
+### 3.1 Definition of done
+Do not stop and wait for the owner between tasks or milestones. Continue until **all** of the following hold at the same time:
+1. Every required CI job on `main` (and the active session branch) is green.
+2. Milestones **M1 through M6** are implemented as specified in 2.12, with the substitutions in 3.6 where an exit criterion in 2.12 depends on owner hardware or owner approval.
+3. `cross.yml` builds the core for **every target in 2.4** (Linux `x86_64`, `x86`, `armv7`, `aarch64`; Android `armv7`, `thumbv7neon`, `aarch64`; Windows `x86_64`, `x86` GNU and MSVC; macOS `arm64`, `x86_64`; iOS `arm64` build-only).
+4. `release.yml` produces a draft release (or workflow artifact) with one zip per platform containing the library, `.info`, `README.md`, and licenses.
+5. Every tag in the SWF specification v19 either has a builder round-trip test or is listed in `docs/notes/tag-coverage.md` with the reason it is unsupported.
+6. The AS1/AS2 conformance suite (M4) has at least 150 generated movies with expected logs derived from ES3 semantics, all passing.
+7. Audio tests (M5, including the marker-pulse stream sync test) and rendering tests (M2, M3) pass against approved or provisional goldens (see 3.7).
+8. Release core size is under 6 MB and `bench` shows no regression above 30%.
+9. `README.md`, `docs/INSTALL.md`, and `docs/KNOWN_LIMITATIONS.md` exist and match the code.
+10. All `human-test` issues (V1 through V7) are open with artifact links ready for the owner to run when they return, and a final summary issue titled `v1 engineering-complete report` is open with the checklist from 3.1 and links to every piece of evidence.
+
+### 3.2 Rules that are relaxed for this run
+- **Rule 14 (stop at milestone boundary):** Replaced by 3.8. Do not stop and wait for `human-test` issues V1–V7 to be closed by the owner before starting the next milestone. Open the issue, attach the artifact run link, mark the milestone `engineering-complete (awaiting human verification)` in `STATUS.md`, and continue immediately.
+- **Protected-path waits (1.2, 2.16 rule 2):** Pre-authorized for this run to edit `.github/workflows/*.yml`, `Cargo.toml`, `deps-allow.txt`, and `references.lock` **only** within the bounds in 3.3.
+- **Golden approval gate (1.6, 2.13):** Replaced by the provisional golden policy in 3.7 so M2 and M3 do not block on human review.
+
+### 3.3 Pre-authorized changes to formerly protected files
+- **`Cargo.toml` and `deps-allow.txt`:** Restricted to the pre-approved crate list in 1.4 (`miniz_oxide`, `lzma-rs`, `tiny-skia`, `png`, `zune-jpeg`, `fontdue`, `symphonia` with `mp3` only).
+- **`.github/workflows/*.yml`:** Pinned actions by commit SHA, read-only default permissions (`contents: write` only in `lockfile.yml` and `release.yml`, `pull-requests: write` / `issues: write` only in `ci-report`).
+- **`references.lock`:** Only specification documents and public-domain/CC0 fonts.
+- **`docs/reference/` and `**/golden/`:** Remain strictly read-only to the AI; provisional goldens go in `**/golden-provisional/`.
+
+### 3.4 Rules that remain strictly in force
+1. **No `unsafe` outside `crates/swfr-libretro/src/ffi.rs`.**
+2. **Never weaken, delete, `#[ignore]`, or `#[allow]` a failing test or lint** to make CI green.
+3. **Never fabricate evidence.**
+4. **Never download in a shell outside a workflow step.**
+5. **Every commit must pass `fmt`, `clippy`, `doc`, `deny`, `build-test`, `abi`, `size-check`, and `cross-build`.**
+
+### 3.5–3.13 Task 0, Milestone Substitutions, Provisional Goldens, Self-Audit, and Heartbeat
+- Execute Task 0 (`3.5`), M1–M6 with autonomous substitutions (`3.6`), provisional goldens (`3.7`), milestone self-audits in `docs/audits/mN.md` (`3.8`), failure recovery (`3.9`), `WORKLOG.md` heartbeat (`3.10`), and scope discipline (`3.11`–`3.13`).
