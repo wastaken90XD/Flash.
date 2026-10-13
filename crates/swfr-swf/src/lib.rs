@@ -1586,14 +1586,15 @@ fn decode_line_style_array(
                 let color = match fill {
                     FillStyle::Solid(c) => c,
                     FillStyle::LinearGradient { ref stops, .. }
-                    | FillStyle::RadialGradient { ref stops, .. } => stops
-                        .first()
-                        .map_or(Rgba {
+                    | FillStyle::RadialGradient { ref stops, .. } => stops.first().map_or(
+                        Rgba {
                             r: 0,
                             g: 0,
                             b: 0,
                             a: 255,
-                        }, |s| s.color),
+                        },
+                        |s| s.color,
+                    ),
                     FillStyle::Bitmap { .. } => Rgba {
                         r: 0,
                         g: 0,
