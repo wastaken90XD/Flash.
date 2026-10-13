@@ -97,3 +97,20 @@ Where Part 3 conflicts with Part 2, **Part 3 wins** for the duration of this aut
 - **M4:** Benchmark flat `match` vs decoded `Vec<Op>` in `DECISIONS.md`; >= 150 generated ES3 conformance movies in `crates/swfr-avm1/tests/conformance.rs`; open V5 `human-test` issue.
 - **M5:** PCM, ADPCM, MP3, resampler, and 300-frame marker-pulse stream sync test; open V6 `human-test` issue.
 - **M6:** Full `cross.yml` matrix (including QEMU user-mode ABI test on `armv7`), `release.yml`, `bench` per-frame cost in `ci-report`, `README.md`, `docs/INSTALL.md`, `docs/KNOWN_LIMITATIONS.md`, open V7 `human-test` issue and `v1 engineering-complete report` issue.
+
+3.14 End-to-end acceptance (added after the first run failed it)
+The first autonomous run reported completion while the released core still played the M0 stub (color bars and a 440 Hz tone) for every file. Unit tests passed because no test drove a real movie through the finished path. This section overrides 3.1 and 3.10. The run is not complete, and no milestone is audited as complete, until all of the following hold. The status in STATUS.md is reset to not complete until then.
+1. The stub is gone. The color-bar and tone generators exist only behind a cargo feature m0-stub, which is off by default. A CI step fails cross.yml and release.yml if that feature is enabled in any shipped build.
+2. No silent fallback. If parsing or player construction fails, retro_load_game logs the error and returns false. It never substitutes a placeholder frame or tone.
+3. Real dependency chain. A CI step runs cargo tree -p swfr-libretro and fails unless it lists swfr-swf, swfr-scene, swfr-render, swfr-avm1 and swfr-audio.
+4. End-to-end ABI tests. In swfr-libretro/tests/e2e.rs, using movies from the swfr-testkit builder and only the exported retro_* symbols:
+    ◦ A 1-frame movie with a red 100x80 rectangle centered on a blue stage: after load and one run, the center pixel is red, the corner is blue, and retro_get_system_av_info reports the stage size and the header frame rate.
+    ◦ A 10-frame movie where a square moves 10 pixels per frame: successive frames differ and the square is at the expected position in each.
+    ◦ A movie with a PCM sound event: the audio buffer contains the sound's exact samples. A silent movie yields all-zero samples. Neither is a 440 Hz sine.
+    ◦ An AS2 movie calling trace('hello'): the log callback receives a line containing hello.
+    ◦ A button movie with scripted pointer input: the click changes the frame.
+    ◦ A malformed file: retro_load_game returns false.
+5. Real files. The corpus-real job loads every manifest file through the exported ABI and runs 120 frames. It fails if any output matches the M0 stub's frame hash.
+6. Honest benchmarks. bench runs the 10-frame movie and the largest real file through the full path. A benchmark of the stub does not count.
+7. Evidence rule. Every audit item must name the test that proves it and the CI run. A criterion with no test is unmet.
+After the gates pass, re-audit M1 to M6 against the new end-to-end tests. Fix whatever fails, then rewrite docs/audits/ and the final report.
