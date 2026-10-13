@@ -9,14 +9,18 @@ permissions:
 jobs:
   lints:
     runs-on: ubuntu-latest
+    outputs:
+      report: ${{ steps.cap.outputs.report }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: rustup show
-      - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --locked -- -D warnings
+      - run: |
+          set -eo pipefail
+          cargo fmt --all --check 2>&1 | tee /tmp/lints.log
+          cargo clippy --workspace --locked -- -D warnings 2>&1 | tee -a /tmp/lints.log
       - name: Verify deps-allow.txt, unsafe boundary, and manifests
         run: |
-          python3 - <<'PY'
+          python3 - <<'PY' 2>&1 | tee -a /tmp/lints.log
           import json, re, subprocess, sys, tomllib
           from pathlib import Path
 
@@ -82,29 +86,38 @@ jobs:
 
           print(f"OK: {len(allowed)} allowed external dependencies and strict ffi unsafe boundary verified.")
           PY
-      - name: Write summary
+      - name: Capture output
+        id: cap
         if: always()
         run: |
-          echo "### Lints & Safety Policy" >> "$GITHUB_STEP_SUMMARY"
-          echo "- \`cargo fmt --all --check\`: passed" >> "$GITHUB_STEP_SUMMARY"
-          echo "- \`cargo clippy --workspace --all-targets --locked -- -D warnings\`: passed" >> "$GITHUB_STEP_SUMMARY"
-          echo "- \`deps-allow.txt\`, \`unsafe\`-only-in-\`ffi\`, & \`corpus/real/MANIFEST.toml\`: verified" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "report<<EOF"
+            tail -n 40 /tmp/lints.log 2>/dev/null || true
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
   build-test:
     runs-on: ubuntu-latest
+    outputs:
+      report: ${{ steps.cap.outputs.report }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: rustup show
-      - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --locked -- -D warnings
-      - run: cargo test --workspace --locked
-      - run: cargo run -p swfr-harness --locked -- info
-      - name: Write summary
+      - run: |
+          set -eo pipefail
+          cargo fmt --all --check 2>&1 | tee /tmp/build.log
+          cargo clippy --workspace --locked -- -D warnings 2>&1 | tee -a /tmp/build.log
+          cargo test --workspace --locked 2>&1 | tee -a /tmp/build.log
+          cargo run -p swfr-harness --locked -- info 2>&1 | tee -a /tmp/build.log
+      - name: Capture output
+        id: cap
         if: always()
         run: |
-          echo "### Workspace Build & Tests" >> "$GITHUB_STEP_SUMMARY"
-          echo "- \`cargo test --workspace --locked\`: passed" >> "$GITHUB_STEP_SUMMARY"
-          echo "- \`cargo run -p swfr-harness --locked -- info\`: passed" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "report<<EOF"
+            tail -n 40 /tmp/build.log 2>/dev/null || true
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
   abi:
     runs-on: ubuntu-latest
@@ -113,29 +126,24 @@ jobs:
       - run: rustup show
       - run: cargo test -p swfr-libretro --locked
       - run: cargo test -p swfr-libretro --features fault-inject --locked
-      - name: Write summary
-        if: always()
-        run: |
-          echo "### libretro ABI & Header Verification" >> "$GITHUB_STEP_SUMMARY"
-          echo "- \`cargo test -p swfr-libretro --locked\`: passed" >> "$GITHUB_STEP_SUMMARY"
-          echo "- \`cargo test -p swfr-libretro --features fault-inject --locked\`: passed" >> "$GITHUB_STEP_SUMMARY"
 
   cross-build:
     runs-on: ubuntu-latest
+    outputs:
+      size_bytes: ${{ steps.size.outputs.size_bytes }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: rustup show
       - run: cargo build --release -p swfr-libretro --locked
       - name: Check core library size budget (< 6 MB)
+        id: size
         run: |
           size_bytes=$(stat -c%s target/release/libswfr_libretro.so)
-          echo "libswfr_libretro.so size: ${size_bytes} bytes"
+          echo "size_bytes=${size_bytes}" >> "$GITHUB_OUTPUT"
           if [ "$size_bytes" -ge 6291456 ]; then
             echo "ERROR: Core library size ${size_bytes} exceeds 6 MB budget" >&2
             exit 1
           fi
-          echo "### Core Library Build & Size Budget" >> "$GITHUB_STEP_SUMMARY"
-          echo "- \`libswfr_libretro.so\`: \`${size_bytes}\` bytes (budget: \`< 6,291,456\` bytes)" >> "$GITHUB_STEP_SUMMARY"
 
   ci-report:
     needs: [lints, build-test, abi, cross-build]
@@ -155,6 +163,9 @@ jobs:
           RES_BUILD: ${{ needs.build-test.result }}
           RES_ABI: ${{ needs.abi.result }}
           RES_CROSS: ${{ needs.cross-build.result }}
+          LINTS_LOG: ${{ needs.lints.outputs.report }}
+          BUILD_LOG: ${{ needs.build-test.outputs.report }}
+          CORE_SIZE: ${{ needs.cross-build.outputs.size_bytes }}
         run: |
           python3 - <<'PY'
           import json, os, subprocess
@@ -162,17 +173,23 @@ jobs:
           repo = os.environ["REPO"]
           pr = os.environ["PR_NUMBER"]
           sha = os.environ["SHA"][:7]
-          body = "\n".join([
+          core_size = os.environ.get("CORE_SIZE", "n/a")
+          lines = [
               "<!-- ci-report -->",
               f"### `ci-report` (`{sha}`)",
               "",
-              "| Job | Result |",
-              "| :--- | :--- |",
-              f"| `lints` | `{os.environ['RES_LINTS']}` |",
-              f"| `build-test` | `{os.environ['RES_BUILD']}` |",
-              f"| `abi` | `{os.environ['RES_ABI']}` |",
-              f"| `cross-build` | `{os.environ['RES_CROSS']}` |",
-          ])
+              "| Job | Result | Notes |",
+              "| :--- | :--- | :--- |",
+              f"| `lints` | `{os.environ['RES_LINTS']}` | Format, Clippy, allowlist & `ffi` boundary |",
+              f"| `build-test` | `{os.environ['RES_BUILD']}` | Workspace unit tests & `swfr-harness` |",
+              f"| `abi` | `{os.environ['RES_ABI']}` | `libretro.h` check, mock frontend & fault injection |",
+              f"| `cross-build` | `{os.environ['RES_CROSS']}` | `libswfr_libretro.so`: `{core_size}` bytes (budget `< 6 MB`) |",
+          ]
+          if os.environ["RES_LINTS"] != "success":
+              lines.extend(["", "#### `lints` output (last 40 lines)", "```text", os.environ.get("LINTS_LOG", ""), "```"])
+          if os.environ["RES_BUILD"] != "success":
+              lines.extend(["", "#### `build-test` output (last 40 lines)", "```text", os.environ.get("BUILD_LOG", ""), "```"])
+          body = "\n".join(lines)
 
           comments_raw = subprocess.check_output(
               ["gh", "api", f"repos/{repo}/issues/{pr}/comments"],
