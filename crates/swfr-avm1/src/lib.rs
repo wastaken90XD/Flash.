@@ -91,13 +91,7 @@ impl Value {
                     f64::NAN
                 }
             }
-            Self::Null => {
-                if swf_version <= 6 {
-                    0.0
-                } else {
-                    0.0
-                }
-            }
+            Self::Null => 0.0,
             Self::Bool(b) => {
                 if *b {
                     1.0
