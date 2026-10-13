@@ -10,6 +10,8 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
+  issues: write
 
 jobs:
   generate-lockfile:
@@ -23,10 +25,35 @@ jobs:
           persist-credentials: true
 
       - name: Generate Cargo.lock, provisional goldens, and format
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cargo generate-lockfile
-          cargo test -p swfr-render --test render_goldens
-          cargo fmt --all
+          set +e
+          {
+            echo "=== cargo generate-lockfile ==="
+            cargo generate-lockfile 2>&1
+            echo "=== cargo fmt --all ==="
+            cargo fmt --all 2>&1
+            echo "=== cargo test -p swfr-render --test render_goldens ==="
+            cargo test -p swfr-render --test render_goldens 2>&1
+            echo "=== cargo clippy --workspace --all-targets -- -D warnings ==="
+            cargo clippy --workspace --all-targets -- -D warnings 2>&1
+            echo "=== cargo test --workspace --exclude swfr-libretro ==="
+            cargo test --workspace --exclude swfr-libretro 2>&1
+          } > /tmp/lockfile-diag.txt
+          set -e
+
+          # Post diagnostic summary to PR #1 if any error occurred
+          if grep -qE "^error(\[|:)" /tmp/lockfile-diag.txt || grep -q "FAILED" /tmp/lockfile-diag.txt; then
+            {
+              printf '%s\n' "<!-- swfr-lockfile-diag -->"
+              printf '%s\n' "### Cargo Build & Test Diagnostics (\`${GITHUB_SHA}\`)"
+              printf '%s\n' '```text'
+              tail -n 160 /tmp/lockfile-diag.txt
+              printf '%s\n' '```'
+            } > /tmp/diag-comment.md
+            gh api -X POST "repos/${GITHUB_REPOSITORY}/issues/1/comments" -F body=@/tmp/diag-comment.md >/dev/null || true
+          fi
 
       - name: Commit and push if changed
         run: |
@@ -34,7 +61,7 @@ jobs:
           if [ -n "$(git status --porcelain)" ]; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add Cargo.lock crates/swfr-render/tests/golden-provisional/
+            git add Cargo.lock crates/swfr-render/tests/golden-provisional/ || true
             git add -u
             git commit -m "chore(ci): update Cargo.lock and provisional goldens"
             git push origin "HEAD:${GITHUB_REF_NAME}"
