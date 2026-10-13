@@ -1,5 +1,10 @@
 //! Display list, character dictionary, shape flattening, timeline engine, and button hit-testing
 //! for `swfr` (TSD 1.6, 2.12 M2 & M3).
+#![allow(
+    clippy::arithmetic_side_effects,
+    clippy::collapsible_if,
+    clippy::collapsible_match
+)]
 
 use std::collections::BTreeMap;
 use std::io::Cursor;

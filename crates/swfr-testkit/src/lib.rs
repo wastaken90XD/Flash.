@@ -1,5 +1,10 @@
 //! Programmatic SWF movie builder, AS1/AS2 bytecode assembler, deterministic mutator,
 //! and golden PNG comparison helpers for `swfr` (TSD 1.6, 2.6, 2.13, 3.7).
+#![allow(
+    clippy::arithmetic_side_effects,
+    clippy::collapsible_if,
+    clippy::collapsible_match
+)]
 
 use std::fs;
 use std::io::Cursor;

@@ -1,6 +1,11 @@
 //! ActionScript 1 & 2 (AVM1) virtual machine, generational arena heap, incremental
 //! mark-and-sweep collector, decoded `Vec<Op>` interpreter, built-in classes, and
 //! deterministic timers for `swfr` (TSD 1.6, 2.9, 2.12 M4).
+#![allow(
+    clippy::arithmetic_side_effects,
+    clippy::collapsible_if,
+    clippy::collapsible_match
+)]
 
 use std::collections::{BTreeMap, BTreeSet};
 use swfr_reader::Reader;

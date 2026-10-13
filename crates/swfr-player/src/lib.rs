@@ -1,5 +1,10 @@
 //! Frame-stepping SWF player coordinator integrating `swfr-swf`, `swfr-scene`, `swfr-render`,
 //! `swfr-avm1`, and `swfr-audio` (TSD 2.6, 2.11, 2.12 M0–M5).
+#![allow(
+    clippy::arithmetic_side_effects,
+    clippy::collapsible_if,
+    clippy::collapsible_match
+)]
 
 use swfr_audio::AudioMixer;
 use swfr_avm1::Avm1;

@@ -1,5 +1,10 @@
 //! Development CLI, benchmark runner, and headless verification harness for `swfr`
 //! (TSD 2.6, 2.12 M0–M6, 3.6 M6).
+#![allow(
+    clippy::arithmetic_side_effects,
+    clippy::collapsible_if,
+    clippy::collapsible_match
+)]
 
 use std::collections::BTreeMap;
 use std::fs;

@@ -1,6 +1,11 @@
 //! Audio decoding (PCM, SWF IMA ADPCM 2/3/4/5-bit, MP3 via `symphonia`), linear resampling
 //! to 44.1 kHz stereo, event sound voices, and frame-locked streaming audio mixer for `swfr`
 //! (TSD 1.6, 2.8, 2.12 M5, 3.6 M5).
+#![allow(
+    clippy::arithmetic_side_effects,
+    clippy::collapsible_if,
+    clippy::collapsible_match
+)]
 
 use std::collections::BTreeMap;
 use std::io::Cursor;

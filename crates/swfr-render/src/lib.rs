@@ -1,6 +1,11 @@
 //! CPU 2D software renderer (`tiny-skia`) for `swfr` with a 64-entry flattened-shape LRU cache,
 //! dirty-rectangle tracking, clipping masks, gradients, bitmaps, embedded & device text,
 //! and `XRGB8888` / `RGB565` output conversion (TSD 1.6, 2.7, 2.12 M2 & M3).
+#![allow(
+    clippy::arithmetic_side_effects,
+    clippy::collapsible_if,
+    clippy::collapsible_match
+)]
 
 use std::collections::BTreeMap;
 use swfr_reader::{ColorTransform, Matrix, Rect};
@@ -9,7 +14,7 @@ use swfr_scene::{
     FlattenedShape, PathCmd, Stage,
 };
 use swfr_swf::{
-    ButtonDef, EditTextDef, FillStyle, FontDef, LineStyle, Rgba, ShapeDef, ShapeRecord, TextDef,
+    ButtonDef, EditTextDef, FillStyle, FontDef, Rgba, ShapeDef, ShapeRecord, TextDef,
 };
 use tiny_skia::{
     Color, FillRule, FilterQuality, GradientStop as SkiaStop, LineCap, LineJoin, LinearGradient,
@@ -423,6 +428,7 @@ fn render_flattened_shape(
                 let focal_x = (f32::from(*focal_point_q8) / 256.0).clamp(-0.98, 0.98) * 16384.0;
                 if let Some(shader) = RadialGradient::new(
                     Point::from_xy(focal_x, 0.0),
+                    0.0,
                     Point::from_xy(0.0, 0.0),
                     16384.0,
                     skia_stops,
@@ -779,7 +785,7 @@ fn apply_cxform(c: Rgba, cx: ColorTransform) -> Rgba {
 }
 
 #[allow(clippy::arithmetic_side_effects)]
-const fn combine_cxform(parent: ColorTransform, child: ColorTransform) -> ColorTransform {
+fn combine_cxform(parent: ColorTransform, child: ColorTransform) -> ColorTransform {
     let mult =
         |pm: i16, cm: i16| -> i16 { ((pm as i32 * cm as i32) >> 8).clamp(-32768, 32767) as i16 };
     let add = |pm: i16, pa: i16, ca: i16| -> i16 {
