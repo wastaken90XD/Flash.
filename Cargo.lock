@@ -306,6 +306,9 @@ name = "swfr-libretro"
 version = "0.1.0"
 dependencies = [
  "swfr-player",
+ "swfr-reader",
+ "swfr-swf",
+ "swfr-testkit",
 ]
 
 [[package]]
