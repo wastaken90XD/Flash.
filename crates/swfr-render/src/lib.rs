@@ -374,8 +374,10 @@ fn render_flattened_shape(
         };
         match &fill.style {
             FillStyle::Solid(rgba) => {
-                let mut paint = Paint::default();
-                paint.anti_alias = true;
+                let mut paint = Paint {
+                    anti_alias: true,
+                    ..Paint::default()
+                };
                 let c = apply_cxform(*rgba, cx);
                 paint.set_color_rgba8(c.r, c.g, c.b, c.a);
                 pixmap.fill_path(&path, &paint, FillRule::EvenOdd, xform, mask);
@@ -477,8 +479,10 @@ fn render_flattened_shape(
         let Some(path) = build_skia_path(&stroke.cmds) else {
             continue;
         };
-        let mut paint = Paint::default();
-        paint.anti_alias = true;
+        let mut paint = Paint {
+            anti_alias: true,
+            ..Paint::default()
+        };
         let c = apply_cxform(stroke.style.color, cx);
         paint.set_color_rgba8(c.r, c.g, c.b, c.a);
         let sk_stroke = Stroke {
@@ -646,8 +650,10 @@ fn render_edit_text(
 
     // Fallback built-in vector stroke glyphs for device fonts / dynamic text
     let c = apply_cxform(edit.color, cx);
-    let mut paint = Paint::default();
-    paint.anti_alias = true;
+    let mut paint = Paint {
+        anti_alias: true,
+        ..Paint::default()
+    };
     paint.set_color_rgba8(c.r, c.g, c.b, c.a);
     let stroke = Stroke {
         width: (height_twips * 0.12).max(20.0),
@@ -691,8 +697,10 @@ fn render_glyph_records(
     let flat = flatten_shape(&shape);
     for fill in &flat.fills {
         if let Some(path) = build_skia_path(&fill.cmds) {
-            let mut paint = Paint::default();
-            paint.anti_alias = true;
+            let mut paint = Paint {
+                anti_alias: true,
+                ..Paint::default()
+            };
             let c = apply_cxform(color, cx);
             paint.set_color_rgba8(c.r, c.g, c.b, c.a);
             pixmap.fill_path(&path, &paint, FillRule::EvenOdd, xform, mask);
