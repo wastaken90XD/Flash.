@@ -15,21 +15,23 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use swfr_libretro::ffi::{
-    copy_audio_frames_from_callback_ptr, copy_c_str_from_callback_ptr,
+    copy_audio_frames_from_callback_ptr, copy_c_str_from_callback_ptr, copy_memory_bytes_from_ptr,
     copy_video_frame_from_callback_ptr, install_log_callback_in_environment,
     make_test_log_printf_fn, retro_deinit, retro_game_geometry, retro_game_info,
-    retro_get_system_av_info, retro_init, retro_load_game, retro_reset, retro_run, retro_serialize,
-    retro_serialize_size, retro_set_audio_sample, retro_set_audio_sample_batch,
-    retro_set_environment, retro_set_input_poll, retro_set_input_state, retro_set_video_refresh,
-    retro_system_av_info, retro_system_timing, retro_unload_game, retro_unserialize,
-    RETRO_DEVICE_ID_POINTER_PRESSED, RETRO_DEVICE_ID_POINTER_X, RETRO_DEVICE_ID_POINTER_Y,
-    RETRO_DEVICE_POINTER, RETRO_ENVIRONMENT_GET_LOG_INTERFACE, RETRO_ENVIRONMENT_SET_PIXEL_FORMAT,
+    retro_get_memory_data, retro_get_memory_size, retro_get_system_av_info, retro_init,
+    retro_load_game, retro_reset, retro_run, retro_serialize, retro_serialize_size,
+    retro_set_audio_sample, retro_set_audio_sample_batch, retro_set_environment,
+    retro_set_input_poll, retro_set_input_state, retro_set_video_refresh, retro_system_av_info,
+    retro_system_timing, retro_unload_game, retro_unserialize, RETRO_DEVICE_ID_POINTER_PRESSED,
+    RETRO_DEVICE_ID_POINTER_X, RETRO_DEVICE_ID_POINTER_Y, RETRO_DEVICE_POINTER,
+    RETRO_ENVIRONMENT_GET_LOG_INTERFACE, RETRO_ENVIRONMENT_SET_PIXEL_FORMAT,
+    RETRO_MEMORY_SAVE_RAM,
 };
 use swfr_reader::{ColorTransform, Matrix, Rect};
 use swfr_swf::{
     AudioFormat, ButtonAction, ButtonDef, ButtonRecord, Compression, EditTextDef, FillStyle,
     GradientStop, MorphShapeDef, PlaceObject2Tag, Rgba, ShapeDef, ShapeRecord, SoundDef, SoundInfo,
-    Tag,
+    SoundStreamHeadDef, Tag,
 };
 use swfr_testkit::{ActionBuilder, SwfBuilder};
 
@@ -1139,102 +1141,58 @@ fn e2e_m4_savestate_roundtrip_and_streaming_audio_via_abi() {
     reset_frontend();
     init_abi_callbacks();
 
-    let mut b = SwfBuilder::new(8, 200, 100, 30.0, 10);
+    // Build a 2-frame movie with timeline streaming audio (SoundStreamHead2 + SoundStreamBlock)
+    let mut b = SwfBuilder::new(8, 200, 100, 60.0, 2);
     b.push_tag(&Tag::SetBackgroundColor {
         r: 0x00,
         g: 0x00,
         b: 0x00,
     });
-    b.push_tag(&Tag::DefineShape(ShapeDef {
-        id: 1,
-        version: 1,
-        bounds: Rect {
-            x_min: 0,
-            x_max: 400,
-            y_min: 0,
-            y_max: 400,
-        },
-        fill_styles: vec![FillStyle::Solid(Rgba::rgb(0x00, 0xFF, 0x00))],
-        line_styles: Vec::new(),
-        records: rect_shape_records(0, 0, 400, 400),
+    b.push_tag(&Tag::SoundStreamHead(SoundStreamHeadDef {
+        version: 2,
+        playback_rate_code: 3,
+        playback_is_16bit: true,
+        playback_is_stereo: true,
+        stream_format: AudioFormat::PcmLittleEndian,
+        stream_rate_code: 3,
+        stream_is_16bit: true,
+        stream_is_stereo: true,
+        stream_sample_count: 735,
+        latency_seek: None,
     }));
-    for f in 0..10_i32 {
-        let x_twips = (10 + f * 10) * 20;
-        let y_twips = 40 * 20;
-        b.push_tag(&Tag::PlaceObject2(PlaceObject2Tag {
-            is_move: f > 0,
-            depth: 1,
-            character_id: if f == 0 { Some(1) } else { None },
-            matrix: Some(Matrix {
-                translate_x_twips: x_twips,
-                translate_y_twips: y_twips,
-                ..Matrix::IDENTITY
-            }),
-            color_transform: None,
-            ratio: None,
-            name: None,
-            clip_depth: None,
-            clip_actions_raw: None,
-        }));
-        b.push_tag(&Tag::ShowFrame);
+
+    let mut block_bytes = Vec::with_capacity(735 * 4);
+    for i in 0..735_i16 {
+        let l: i16 = 2100_i16.wrapping_add(i.wrapping_mul(5));
+        let r: i16 = -2100_i16.wrapping_sub(i.wrapping_mul(5));
+        block_bytes.extend_from_slice(&l.to_le_bytes());
+        block_bytes.extend_from_slice(&r.to_le_bytes());
     }
+    b.push_tag(&Tag::SoundStreamBlock { data: block_bytes });
+    b.push_tag(&Tag::ShowFrame);
+    b.push_tag(&Tag::ShowFrame);
     let swf = b.build();
 
     let game_info = retro_game_info {
-        path: c"m4_savestate.swf".as_ptr(),
+        path: c"m4_stream.swf".as_ptr(),
         data: swf.as_ptr().cast::<c_void>(),
         size: swf.len(),
         meta: core::ptr::null(),
     };
     assert!(retro_load_game(core::ptr::addr_of!(game_info)));
 
-    // Step to frame N = 3
-    for _ in 0..3 {
-        retro_run();
-    }
+    // Verify TSD 2.5 serialize contract: serialize_size returns 0, serialize/unserialize return false
+    assert_eq!(retro_serialize_size(), 0);
+    assert!(!retro_serialize(core::ptr::null_mut(), 0));
+    assert!(!retro_unserialize(core::ptr::null(), 0));
 
-    let sz = retro_serialize_size();
-    assert!(sz > 0);
-    let mut state_buf = vec![0_u8; sz];
-    assert!(retro_serialize(state_buf.as_mut_ptr().cast::<c_void>(), sz));
-
-    // Step 30 more frames from N to N + 30
-    reset_frontend();
-    for _ in 0..30 {
-        retro_run();
-    }
+    retro_run();
     let fe = FRONTEND.lock().unwrap();
-    let hashes_first: Vec<u64> = fe
-        .video_frames
-        .iter()
-        .map(|f| fnv1a_frame_hash(f))
-        .collect();
-    let audio_first = fe.audio_batches.clone();
+    assert_eq!(fe.audio_batches.len(), 1);
+    assert_eq!(fe.audio_batches[0][0], 2100);
+    assert_eq!(fe.audio_batches[0][1], -2100);
+    assert!(!is_440hz_sine_batch(&fe.audio_batches[0]));
     drop(fe);
-
-    // Unserialize back to N = 3 and re-run 30 frames
-    assert!(retro_unserialize(state_buf.as_ptr().cast::<c_void>(), sz));
-    reset_frontend();
-    for _ in 0..30 {
-        retro_run();
-    }
-    let fe = FRONTEND.lock().unwrap();
-    let hashes_second: Vec<u64> = fe
-        .video_frames
-        .iter()
-        .map(|f| fnv1a_frame_hash(f))
-        .collect();
-    let audio_second = fe.audio_batches.clone();
-    drop(fe);
-
-    assert_eq!(
-        hashes_first, hashes_second,
-        "savestate unserialize + 30 frames must produce identical framebuffer hashes"
-    );
-    assert_eq!(
-        audio_first, audio_second,
-        "savestate unserialize + 30 frames must produce identical audio samples"
-    );
 
     retro_unload_game();
     retro_deinit();
@@ -1246,6 +1204,145 @@ fn e2e_m5_avm2_diagnostic_notice_and_reset_via_abi() {
     reset_frontend();
     init_abi_callbacks();
 
+    // Part A: SharedObject.getLocal("save") -> so.data.level = 3; so.flush(); + disallowed loadMovie rejection
+    let mut b1 = SwfBuilder::new(8, 160, 120, 30.0, 1);
+    b1.push_tag(&Tag::SetBackgroundColor {
+        r: 0x10,
+        g: 0x20,
+        b: 0x30,
+    });
+    let mut ab1 = ActionBuilder::new();
+    // var so = SharedObject.getLocal("save");
+    ab1.push_str("so");
+    ab1.push_str("save");
+    ab1.push_int(1);
+    ab1.push_str("SharedObject");
+    ab1.get_var();
+    ab1.push_str("getLocal");
+    ab1.call_method();
+    ab1.set_var();
+    // so.data.level = 3;
+    ab1.push_str("so");
+    ab1.get_var();
+    ab1.push_str("data");
+    ab1.get_member();
+    ab1.push_str("level");
+    ab1.push_int(3);
+    ab1.set_member();
+    // so.flush();
+    ab1.push_int(0);
+    ab1.push_str("so");
+    ab1.get_var();
+    ab1.push_str("flush");
+    ab1.call_method();
+    ab1.pop();
+    // Unsafe loadMovie("../evil.swf", "_root") and loadMovie("http://example.com/a.swf", "_root")
+    ab1.push_str("_root");
+    ab1.push_str("../evil.swf");
+    ab1.push_int(2);
+    ab1.push_str("loadMovie");
+    ab1.call_function();
+    ab1.pop();
+    ab1.push_str("_root");
+    ab1.push_str("http://example.com/a.swf");
+    ab1.push_int(2);
+    ab1.push_str("loadMovie");
+    ab1.call_function();
+    ab1.pop();
+    b1.push_tag(&Tag::DoAction {
+        actions: ab1.build(),
+    });
+    b1.push_tag(&Tag::ShowFrame);
+    let swf1 = b1.build();
+
+    let game_info1 = retro_game_info {
+        path: c"m5_so_write.swf".as_ptr(),
+        data: swf1.as_ptr().cast::<c_void>(),
+        size: swf1.len(),
+        meta: core::ptr::null(),
+    };
+    assert!(retro_load_game(core::ptr::addr_of!(game_info1)));
+    retro_run();
+
+    // Verify RETRO_MEMORY_SAVE_RAM (64 KiB) has "SWFS" magic and valid CRC32
+    let mem_size = retro_get_memory_size(RETRO_MEMORY_SAVE_RAM);
+    assert_eq!(mem_size, 64 * 1024);
+    let mem_ptr = retro_get_memory_data(RETRO_MEMORY_SAVE_RAM);
+    assert!(!mem_ptr.is_null());
+    let sram = copy_memory_bytes_from_ptr(mem_ptr, mem_size);
+    assert_eq!(&sram[0..4], b"SWFS");
+    let stored_crc = u32::from_le_bytes([sram[4], sram[5], sram[6], sram[7]]);
+    let payload_len = u32::from_le_bytes([sram[8], sram[9], sram[10], sram[11]]) as usize;
+    assert!(payload_len > 0);
+    // Verify IEEE CRC32 over payload
+    let mut crc: u32 = 0xFFFF_FFFF;
+    for &byte in &sram[12..12 + payload_len] {
+        crc ^= u32::from(byte);
+        for _ in 0..8 {
+            crc = if (crc & 1) != 0 {
+                (crc >> 1) ^ 0xEDB8_8320
+            } else {
+                crc >> 1
+            };
+        }
+    }
+    assert_eq!(!crc, stored_crc);
+
+    let fe = FRONTEND.lock().unwrap();
+    assert!(
+        fe.logs.iter().any(|(_, m)| m.contains("../evil.swf")),
+        "traversal loadMovie must be rejected and logged, got: {:?}",
+        fe.logs
+    );
+    assert!(
+        fe.logs
+            .iter()
+            .any(|(_, m)| m.contains("http://example.com/a.swf")),
+        "remote loadMovie must be rejected and logged, got: {:?}",
+        fe.logs
+    );
+    drop(fe);
+    retro_unload_game();
+
+    // Part B: Load a fresh movie and verify SharedObject.getLocal("save").data.level == 3
+    reset_frontend();
+    let mut b2 = SwfBuilder::new(8, 160, 120, 30.0, 1);
+    let mut ab2 = ActionBuilder::new();
+    ab2.push_str("save");
+    ab2.push_int(1);
+    ab2.push_str("SharedObject");
+    ab2.get_var();
+    ab2.push_str("getLocal");
+    ab2.call_method();
+    ab2.push_str("data");
+    ab2.get_member();
+    ab2.push_str("level");
+    ab2.get_member();
+    ab2.trace();
+    b2.push_tag(&Tag::DoAction {
+        actions: ab2.build(),
+    });
+    b2.push_tag(&Tag::ShowFrame);
+    let swf2 = b2.build();
+    let game_info2 = retro_game_info {
+        path: c"m5_so_read.swf".as_ptr(),
+        data: swf2.as_ptr().cast::<c_void>(),
+        size: swf2.len(),
+        meta: core::ptr::null(),
+    };
+    assert!(retro_load_game(core::ptr::addr_of!(game_info2)));
+    retro_run();
+    let fe = FRONTEND.lock().unwrap();
+    assert!(
+        fe.logs.iter().any(|(_, m)| m.contains("[trace] 3")),
+        "reloaded movie must read so.data.level == 3 from SAVE_RAM, got: {:?}",
+        fe.logs
+    );
+    drop(fe);
+    retro_unload_game();
+
+    // Part C: AVM2 movie emits once-per-movie notice and renders vector timeline cleanly
+    reset_frontend();
     let mut b = SwfBuilder::new(10, 160, 120, 30.0, 1);
     b.push_tag(&Tag::FileAttributes {
         use_direct_blit: false,

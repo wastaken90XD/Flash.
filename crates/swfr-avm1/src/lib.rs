@@ -972,6 +972,32 @@ pub struct Avm1 {
     pub sound_volume: i32,
     /// Whether `ActionStopSounds` was called this frame.
     pub stop_sounds_requested: bool,
+    /// Persistent `SharedObject` data objects keyed by local name (`SharedObject.getLocal`).
+    pub shared_objects: BTreeMap<String, ObjId>,
+    /// 64 KiB `RETRO_MEMORY_SAVE_RAM` buffer with `"SWFS"` magic + CRC32 header (TSD 2.5, M5.5).
+    pub save_ram: Vec<u8>,
+    /// Pending `loadMovie(url, target)` requests queued during the frame (TSD M5.6).
+    pub load_movie_requests: Vec<(String, String)>,
+}
+
+/// Size in bytes of the libretro `RETRO_MEMORY_SAVE_RAM` buffer (`64 KiB`, TSD 2.5).
+pub const SAVE_RAM_SIZE: usize = 64 * 1024;
+
+/// Computes standard IEEE 802.3 CRC32 over `bytes`.
+#[must_use]
+pub fn compute_crc32(bytes: &[u8]) -> u32 {
+    let mut crc: u32 = 0xFFFF_FFFF;
+    for &b in bytes {
+        crc ^= u32::from(b);
+        for _ in 0..8 {
+            if (crc & 1) != 0 {
+                crc = (crc >> 1) ^ 0xEDB8_8320;
+            } else {
+                crc >>= 1;
+            }
+        }
+    }
+    !crc
 }
 
 impl Default for Avm1 {
@@ -984,6 +1010,11 @@ impl Avm1 {
     /// Creates a new [`Avm1`] virtual machine for `swf_version`.
     #[must_use]
     pub fn new(swf_version: u8) -> Self {
+        let mut save_ram = vec![0_u8; SAVE_RAM_SIZE];
+        let empty_crc = compute_crc32(&[]);
+        save_ram[0..4].copy_from_slice(b"SWFS");
+        save_ram[4..8].copy_from_slice(&empty_crc.to_le_bytes());
+        save_ram[8..12].copy_from_slice(&0_u32.to_le_bytes());
         let mut vm = Self {
             swf_version,
             heap: Heap::new(),
@@ -1007,6 +1038,9 @@ impl Avm1 {
             next_timer_id: 1,
             sound_volume: 100,
             stop_sounds_requested: false,
+            shared_objects: BTreeMap::new(),
+            save_ram,
+            load_movie_requests: Vec::new(),
         };
         vm.init_builtins();
         vm
@@ -1104,6 +1138,102 @@ impl Avm1 {
             self.swf_version,
         );
         self.set_global("Mouse", Value::Object(mouse_id));
+
+        // SharedObject built-in object (TSD 2.5, M5.5)
+        let so_id = self.heap.alloc_object(None);
+        self.heap.set_prop(
+            so_id,
+            "__builtin__",
+            Value::String("SharedObject".to_owned()),
+            self.swf_version,
+        );
+        self.set_global("SharedObject", Value::Object(so_id));
+    }
+
+    /// Serializes all `SharedObject` instances into the 64 KiB `"SWFS"` + CRC32 `save_ram` buffer.
+    pub fn flush_shared_objects_to_save_ram(&mut self) {
+        let mut payload = Vec::new();
+        for (so_name, &data_id) in &self.shared_objects {
+            for key in self.heap.own_keys(data_id) {
+                if key.starts_with("__") {
+                    continue;
+                }
+                let val = self.heap.get_prop(data_id, &key, self.swf_version);
+                let line = match val {
+                    Value::Number(n) => format!("{so_name}\t{key}\tN\t{n}\n"),
+                    Value::Bool(b) => format!("{so_name}\t{key}\tB\t{b}\n"),
+                    Value::String(s) => {
+                        let escaped = s.replace(['\t', '\n', '\r'], " ");
+                        format!("{so_name}\t{key}\tS\t{escaped}\n")
+                    }
+                    _ => continue,
+                };
+                if 12_usize.saturating_add(payload.len()).saturating_add(line.len())
+                    <= SAVE_RAM_SIZE
+                {
+                    payload.extend_from_slice(line.as_bytes());
+                }
+            }
+        }
+        let crc = compute_crc32(&payload);
+        let len_u32 = u32::try_from(payload.len()).unwrap_or(0);
+        if self.save_ram.len() < SAVE_RAM_SIZE {
+            self.save_ram.resize(SAVE_RAM_SIZE, 0);
+        }
+        self.save_ram.fill(0);
+        self.save_ram[0..4].copy_from_slice(b"SWFS");
+        self.save_ram[4..8].copy_from_slice(&crc.to_le_bytes());
+        self.save_ram[8..12].copy_from_slice(&len_u32.to_le_bytes());
+        let end = 12_usize.saturating_add(payload.len()).min(SAVE_RAM_SIZE);
+        self.save_ram[12..end].copy_from_slice(&payload[..end.saturating_sub(12)]);
+    }
+
+    /// Loads and verifies a `"SWFS"` + CRC32 `SAVE_RAM` buffer into `shared_objects` (TSD 2.5, M5.5).
+    pub fn load_save_ram(&mut self, buf: &[u8]) -> bool {
+        if buf.len() < 12 || &buf[0..4] != b"SWFS" {
+            return false;
+        }
+        let expected_crc = u32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]);
+        let payload_len = u32::from_le_bytes([buf[8], buf[9], buf[10], buf[11]]) as usize;
+        let Some(end) = 12_usize.checked_add(payload_len) else {
+            return false;
+        };
+        if end > buf.len() || end > SAVE_RAM_SIZE {
+            return false;
+        }
+        let payload = &buf[12..end];
+        if compute_crc32(payload) != expected_crc {
+            return false;
+        }
+        let Ok(text) = core::str::from_utf8(payload) else {
+            return false;
+        };
+        for line in text.lines() {
+            let mut parts = line.splitn(4, '\t');
+            let (Some(so_name), Some(key), Some(kind), Some(raw_val)) =
+                (parts.next(), parts.next(), parts.next(), parts.next())
+            else {
+                continue;
+            };
+            let data_id = *self
+                .shared_objects
+                .entry(so_name.to_owned())
+                .or_insert_with(|| self.heap.alloc_object(None));
+            let parsed = match kind {
+                "N" => Value::Number(raw_val.parse::<f64>().unwrap_or(f64::NAN)),
+                "B" => Value::Bool(raw_val == "true"),
+                "S" => Value::String(raw_val.to_owned()),
+                _ => continue,
+            };
+            self.heap.set_prop(data_id, key, parsed, self.swf_version);
+        }
+        if self.save_ram.len() < SAVE_RAM_SIZE {
+            self.save_ram.resize(SAVE_RAM_SIZE, 0);
+        }
+        self.save_ram.fill(0);
+        let copy_len = buf.len().min(SAVE_RAM_SIZE);
+        self.save_ram[..copy_len].copy_from_slice(&buf[..copy_len]);
+        true
     }
 
     /// Sets the key state for `Key.isDown(code)` and `Key.getCode()`.
@@ -1192,6 +1322,7 @@ impl Avm1 {
             let mut roots: Vec<Value> = self.stack.clone();
             roots.extend(self.globals.values().cloned());
             roots.extend(self.registers.iter().cloned());
+            roots.extend(self.shared_objects.values().copied().map(Value::Object));
             let _ = self.heap.collect_garbage(&roots);
         }
     }
@@ -1807,6 +1938,17 @@ impl Avm1 {
                 self.timers.retain(|t| t.id != id);
                 Value::Undefined
             }
+            "loadmovie" | "loadmovienum" => {
+                let url = args.first().map_or_else(String::new, |v| {
+                    v.to_avm_string(self.swf_version, &self.heap)
+                });
+                let target = args.get(1).map_or_else(
+                    || "_root".to_owned(),
+                    |v| v.to_avm_string(self.swf_version, &self.heap),
+                );
+                self.load_movie_requests.push((url, target));
+                Value::Undefined
+            }
             _ => {
                 let fval = locals
                     .get(&norm)
@@ -1948,16 +2090,63 @@ impl Avm1 {
                     }
                     Value::Undefined
                 }
+                "loadmovie" => {
+                    let url = args.first().map_or_else(String::new, |v| {
+                        v.to_avm_string(self.swf_version, &self.heap)
+                    });
+                    self.load_movie_requests.push((url, path.clone()));
+                    Value::Undefined
+                }
                 _ => Value::Undefined,
             };
         }
 
-        // 3. Heap Objects (Built-in Math, Key, Sound, Array, or user objects)
+        // 3. Heap Objects (Built-in Math, Key, Sound, SharedObject, Array, or user objects)
         let Value::Object(obj_id) = *receiver else {
             return Value::Undefined;
         };
 
         if let Value::String(btag) = self.heap.get_prop(obj_id, "__builtin__", self.swf_version) {
+            if btag == "SharedObject" && norm == "getlocal" {
+                let name = args.first().map_or_else(
+                    || "default".to_owned(),
+                    |v| v.to_avm_string(self.swf_version, &self.heap),
+                );
+                let data_id = *self
+                    .shared_objects
+                    .entry(name)
+                    .or_insert_with(|| self.heap.alloc_object(None));
+                let inst_id = self.heap.alloc_object(None);
+                self.heap.set_prop(
+                    inst_id,
+                    "__builtin__",
+                    Value::String("SharedObjectInstance".to_owned()),
+                    self.swf_version,
+                );
+                self.heap
+                    .set_prop(inst_id, "data", Value::Object(data_id), self.swf_version);
+                return Value::Object(inst_id);
+            }
+            if btag == "SharedObjectInstance" {
+                return match norm.as_str() {
+                    "flush" => {
+                        self.flush_shared_objects_to_save_ram();
+                        Value::Bool(true)
+                    }
+                    "clear" => {
+                        if let Value::Object(data_id) =
+                            self.heap.get_prop(obj_id, "data", self.swf_version)
+                        {
+                            for k in self.heap.own_keys(data_id) {
+                                let _ = self.heap.delete_prop(data_id, &k, self.swf_version);
+                            }
+                        }
+                        self.flush_shared_objects_to_save_ram();
+                        Value::Undefined
+                    }
+                    _ => Value::Undefined,
+                };
+            }
             if btag == "Math" {
                 let x = args
                     .first()

@@ -207,8 +207,10 @@ fn full_libretro_abi_lifecycle_and_fault_containment() {
     retro_cheat_reset();
     retro_cheat_set(0, false, core::ptr::null());
     assert_eq!(retro_get_region(), RETRO_REGION_NTSC);
-    assert!(retro_get_memory_data(0).is_null());
-    assert_eq!(retro_get_memory_size(0), 0);
+    assert!(!retro_get_memory_data(0).is_null());
+    assert_eq!(retro_get_memory_size(0), 64 * 1024);
+    assert!(retro_get_memory_data(1).is_null());
+    assert_eq!(retro_get_memory_size(1), 0);
 
     retro_reset();
     retro_unload_game();

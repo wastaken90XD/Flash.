@@ -57,6 +57,8 @@ pub struct CoreState {
     pub dead_audio_buf: Vec<i16>,
     /// Scratch log buffer for dead-state single-shot error reporting.
     pub dead_logs: Vec<LogLine>,
+    /// 64 KiB `RETRO_MEMORY_SAVE_RAM` buffer backing `SharedObject.getLocal` (TSD 2.5, M5.5).
+    pub save_ram: Vec<u8>,
     /// Whether the next `retro_run` should inject a test panic (`fault-inject` testing).
     pub inject_fault_next_run: bool,
 }
@@ -95,6 +97,7 @@ impl CoreState {
             dead_frame_buf: Vec::new(),
             dead_audio_buf: Vec::new(),
             dead_logs: Vec::new(),
+            save_ram: Vec::new(),
             inject_fault_next_run: false,
         }
     }
@@ -106,6 +109,10 @@ impl CoreState {
         self.panic_logged = false;
         self.panic_message = None;
         self.inject_fault_next_run = false;
+        if self.save_ram.len() != 64 * 1024 {
+            self.save_ram = vec![0_u8; 64 * 1024];
+            self.save_ram[0..4].copy_from_slice(b"SWFS");
+        }
     }
 
     /// Tears down the core (`retro_deinit`).
@@ -118,6 +125,7 @@ impl CoreState {
         self.dead_frame_buf.clear();
         self.dead_audio_buf.clear();
         self.dead_logs.clear();
+        self.save_ram.clear();
         self.inject_fault_next_run = false;
     }
 
@@ -134,8 +142,16 @@ impl CoreState {
         self.dead = false;
         self.panic_logged = false;
         self.panic_message = None;
-        let player =
+        let mut player =
             Player::new(swf_bytes, base_dir, &self.options).map_err(|err| err.to_string())?;
+        if self.save_ram.len() == 64 * 1024 && &self.save_ram[0..4] == b"SWFS" {
+            let _ = player.load_save_ram(&self.save_ram);
+        }
+        let sram = player.save_ram();
+        if sram.len() == 64 * 1024 {
+            self.save_ram.clear();
+            self.save_ram.extend_from_slice(sram);
+        }
         let av = player.av_info();
         self.fallback_width = av.width;
         self.fallback_height = av.height;
@@ -225,6 +241,8 @@ impl CoreState {
 
         if let Some(player) = self.player.as_mut() {
             let out = player.run_frame(&input);
+            let sram = out.logs; // borrow check: copy save_ram after borrowing out
+            let _ = sram;
             let (video_pixels, width, height) = match out.video {
                 Some(frame) => (
                     Some(frame.xrgb.as_slice()),

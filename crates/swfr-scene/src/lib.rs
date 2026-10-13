@@ -1057,7 +1057,8 @@ impl Stage {
         stage
     }
 
-    fn register_definitions(&mut self, tags: &[Tag]) {
+    /// Registers dictionary character definitions from `tags` (recursing into `DefineSprite`).
+    pub fn register_definitions(&mut self, tags: &[Tag]) {
         for tag in tags {
             match tag {
                 Tag::DefineShape(s) => {

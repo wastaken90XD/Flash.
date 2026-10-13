@@ -109,6 +109,8 @@ pub const RETRO_DEVICE_ID_POINTER_COUNT: c_uint = 3;
 pub const RETRO_REGION_NTSC: c_uint = 0;
 /// `RETRO_REGION_PAL` (`libretro.h:444`).
 pub const RETRO_REGION_PAL: c_uint = 1;
+/// `RETRO_MEMORY_SAVE_RAM` (`libretro.h:450`).
+pub const RETRO_MEMORY_SAVE_RAM: c_uint = 0;
 
 /// `RETRO_ENVIRONMENT_EXPERIMENTAL` (`libretro.h:730`).
 pub const RETRO_ENVIRONMENT_EXPERIMENTAL: c_uint = 0x10000;
@@ -1072,6 +1074,14 @@ pub extern "C" fn retro_run() {
             let stereo_frames = step.audio_samples.len().checked_div(2).unwrap_or(0);
             let _ = a_cb(step.audio_samples.as_ptr(), stereo_frames);
         }
+
+        if let Some(ref player) = slot.state.player {
+            let sram = player.save_ram();
+            if sram.len() == 64 * 1024 {
+                slot.state.save_ram.clear();
+                slot.state.save_ram.extend_from_slice(sram);
+            }
+        }
     });
 }
 
@@ -1107,14 +1117,39 @@ pub extern "C" fn retro_get_region() -> c_uint {
     RETRO_REGION_NTSC
 }
 
-/// Returns null (`libretro.h:9085`).
+/// Returns a pointer to the 64 KiB `SharedObject` `SAVE_RAM` buffer for `RETRO_MEMORY_SAVE_RAM` (`0`), or null (`libretro.h:9085`, TSD 2.5).
 #[no_mangle]
-pub extern "C" fn retro_get_memory_data(_id: c_uint) -> *mut c_void {
-    core::ptr::null_mut()
+pub extern "C" fn retro_get_memory_data(id: c_uint) -> *mut c_void {
+    if id != RETRO_MEMORY_SAVE_RAM {
+        return core::ptr::null_mut();
+    }
+    with_global(core::ptr::null_mut(), |slot| {
+        if slot.state.save_ram.len() != 64 * 1024 {
+            slot.state.save_ram = vec![0_u8; 64 * 1024];
+            slot.state.save_ram[0..4].copy_from_slice(b"SWFS");
+        }
+        slot.state.save_ram.as_mut_ptr().cast::<c_void>()
+    })
 }
 
-/// Returns `0` (`libretro.h:9099`).
+/// Returns `65536` (`64 KiB`) for `RETRO_MEMORY_SAVE_RAM` (`0`), or `0` for any other memory ID (`libretro.h:9099`, TSD 2.5).
 #[no_mangle]
-pub extern "C" fn retro_get_memory_size(_id: c_uint) -> usize {
-    0
+pub extern "C" fn retro_get_memory_size(id: c_uint) -> usize {
+    if id == RETRO_MEMORY_SAVE_RAM {
+        64 * 1024
+    } else {
+        0
+    }
 }
+
+/// Copies a byte slice from a `retro_get_memory_data` pointer for safe integration testing.
+#[must_use]
+pub fn copy_memory_bytes_from_ptr(data: *const c_void, len: usize) -> Vec<u8> {
+    if data.is_null() || len == 0 {
+        return Vec::new();
+    }
+    // SAFETY: Caller passes a valid pointer returned by `retro_get_memory_data` of at least `len` bytes.
+    let slice = unsafe { core::slice::from_raw_parts(data.cast::<u8>(), len) };
+    slice.to_vec()
+}
+

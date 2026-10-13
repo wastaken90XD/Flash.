@@ -528,6 +528,25 @@ impl Player {
         self.frame_count
     }
 
+    /// Returns the 64 KiB `"SWFS"` + CRC32 `SAVE_RAM` buffer backing `SharedObject.getLocal` (TSD 2.5, M5.5).
+    #[must_use]
+    pub fn save_ram(&self) -> &[u8] {
+        if let Some(ref rt) = self.runtime {
+            &rt.vm.save_ram
+        } else {
+            &[]
+        }
+    }
+
+    /// Loads and verifies a 64 KiB `"SWFS"` + CRC32 `SAVE_RAM` buffer into `SharedObject` storage (TSD 2.5, M5.5).
+    pub fn load_save_ram(&mut self, buf: &[u8]) -> bool {
+        if let Some(ref mut rt) = self.runtime {
+            rt.vm.load_save_ram(buf)
+        } else {
+            false
+        }
+    }
+
     /// Advances the player by one frame and produces video, stereo audio, and logs (TSD 2.6, 3.14).
     #[allow(clippy::arithmetic_side_effects)]
     pub fn run_frame(&mut self, input: &Input) -> FrameOut<'_> {
@@ -602,6 +621,12 @@ impl Player {
                 &mut rt.vm,
                 &mut rt.audio,
                 self.options.trace_to_log,
+                &mut self.logs,
+            );
+            Self::process_load_movie_requests(
+                self.base_dir.as_deref(),
+                &mut rt.vm,
+                &mut rt.stage,
                 &mut self.logs,
             );
 
@@ -736,6 +761,57 @@ impl Player {
         if vm.stop_sounds_requested {
             vm.stop_sounds_requested = false;
             audio.stop_all_sounds();
+        }
+    }
+
+    fn process_load_movie_requests(
+        base_dir: Option<&str>,
+        vm: &mut Avm1,
+        stage: &mut Stage,
+        logs: &mut Vec<LogLine>,
+    ) {
+        for (url, target) in vm.load_movie_requests.drain(..) {
+            let trimmed = url.trim();
+            let lower = trimmed.to_ascii_lowercase();
+            let has_scheme = lower.starts_with("http://")
+                || lower.starts_with("https://")
+                || lower.starts_with("file://")
+                || lower.starts_with("javascript:")
+                || trimmed.contains("://");
+            let is_abs = trimmed.starts_with('/')
+                || trimmed.starts_with('\\')
+                || trimmed.as_bytes().get(1) == Some(&b':');
+            let has_traversal = trimmed
+                .split(['/', '\\'])
+                .any(|seg| seg == ".." || seg.is_empty() && is_abs);
+            if trimmed.is_empty() || has_scheme || is_abs || has_traversal {
+                logs.push(LogLine {
+                    level: LogLevel::Warn,
+                    message: format!(
+                        "[swfr] Rejected disallowed or non-relative loadMovie path '{url}' (target '{target}')"
+                    ),
+                });
+                continue;
+            }
+            if let Some(dir) = base_dir {
+                let candidate = std::path::Path::new(dir).join(trimmed);
+                if let Ok(bytes) = std::fs::read(&candidate) {
+                    if let Ok(sub_movie) = Movie::parse(&bytes) {
+                        stage.register_definitions(&sub_movie.tags);
+                        logs.push(LogLine {
+                            level: LogLevel::Info,
+                            message: format!(
+                                "[swfr] Loaded sibling SWF '{url}' into '{target}' from '{dir}'"
+                            ),
+                        });
+                        continue;
+                    }
+                }
+            }
+            logs.push(LogLine {
+                level: LogLevel::Warn,
+                message: format!("[swfr] Sibling SWF '{url}' not found in base_dir for '{target}'"),
+            });
         }
     }
 
