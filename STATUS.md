@@ -1,18 +1,16 @@
-# Project Status (`STATUS.md`)
+# `swfr` Milestone & Autonomous Execution Status (`STATUS.md`)
 
-- **Current Milestone:** `M6` — Packaging, cross-platform builds, and v1 release engineering
-- **Overall v1 Status:** `engineering-complete (awaiting human verification V1–V7)`
-- **Active Branch / PR:** `arena/a4bfe02a-flash` ([PR #1](https://github.com/wastaken90XD/Flash./pull/1))
+**Branch:** `arena/a4bfe02a-flash` ([PR #1](https://github.com/wastaken90XD/Flash./pull/1))
+**Final Report Issue:** [#10 (`v1 engineering-complete report`)](https://github.com/wastaken90XD/Flash./issues/10)
+**Directive:** TSD Part 3 (`3.1`–`3.13`, Autonomous completion of Task 0 and M1 through M6)
 
-## Milestone Summary
-
-| Milestone | Scope | Status | Self-Audit | Human-Test Issue |
+| Milestone | Scope | Implementation Status | CI / Verification Status | Self-Audit |
 | :--- | :--- | :--- | :--- | :--- |
-| **M0 + Task 0** | Bootstrap, libretro C ABI, stub player, 25 symbol check, SHA-pinned CI | `engineering-complete (awaiting human verification)` | [`docs/audits/m0.md`](docs/audits/m0.md) | V1: [Issue #2](https://github.com/wastaken90XD/Flash./issues/2) |
-| **M1** | `swfr-reader`, `swfr-swf` (`FWS`/`CWS`/`ZWS`), SWF v19 tags, `SwfBuilder`, 100k `Mutator` | `engineering-complete` | [`docs/audits/m1.md`](docs/audits/m1.md) | Automated (`tag_roundtrip.rs`) |
-| **M2** | `swfr-scene` display list & shape flattener, `swfr-render` (`tiny-skia`), 64-entry LRU, dirty rects | `engineering-complete (awaiting human verification)` | [`docs/audits/m2.md`](docs/audits/m2.md) | V2 (`human-test`) |
-| **M3** | Timeline engine, `DefineSprite`, buttons & vector hit-test, input modes, `DefineText*` / `DefineEditText` | `engineering-complete (awaiting human verification)` | [`docs/audits/m3.md`](docs/audits/m3.md) | V3 & V4 (`human-test`) |
-| **M4** | `swfr-avm1` (`Value`, ES3 coercions, generational `Heap` + GC, decoded `Vec<Op>`, 160 conformance movies) | `engineering-complete (awaiting human verification)` | [`docs/audits/m4.md`](docs/audits/m4.md) | V5 (`human-test`) |
-| **M5** | `swfr-audio` (PCM, SWF ADPCM 2/3/4/5-bit, MP3 via `symphonia`, 44.1 kHz resampler, 300-frame sync test) | `engineering-complete (awaiting human verification)` | [`docs/audits/m5.md`](docs/audits/m5.md) | V6 (`human-test`) |
-| **M6** | Full `cross.yml` matrix (Linux/Android/Windows/macOS/iOS + QEMU `armv7`), `release.yml`, `bench`, docs | `engineering-complete (awaiting human verification)` | [`docs/audits/m6.md`](docs/audits/m6.md) | V7 (`human-test`) |
-| **M7** | ActionScript 3 (`swfr-avm2`) | Deferred post-v1 (TSD 3.13) | — | — |
+| **Task 0 (M0 Cleanup)** | 25-symbol `nm`/`objdump` gate, SHA-pinned actions, `ci-report` table, Issue #2 `human-test` label & checklist fix, `windows-latest`/`macos-latest` CI jobs, `docs/platform-notes.md` marked `UNVERIFIED` | **Complete** | Green ([ci.yml](https://github.com/wastaken90XD/Flash./actions/runs/38333151599)) | [`docs/audits/m0.md`](docs/audits/m0.md) |
+| **M1** | `swfr-reader`, `swfr-swf` (`FWS`/`CWS`/`ZWS`, v19 tags), `swfr-testkit` (`SwfBuilder`, 100k-iteration `Mutator`, round-trip suite), `docs/notes/swf-format.md`, `docs/notes/tag-coverage.md` | **Complete** | Green (`tag_roundtrip.rs` passing) | [`docs/audits/m1.md`](docs/audits/m1.md) |
+| **M2** | `swfr-scene` (dictionary, display list, shape/morph flattener, lossless/JPEG/PNG bitmaps), `swfr-render` (`tiny-skia`, 64-entry LRU cache, dirty-rect skip, masks, `XRGB8888`/`RGB565`), `GOLDENS.md` | **Complete** | Green (`render_goldens.rs` passing; V2 [#4](https://github.com/wastaken90XD/Flash./issues/4)) | [`docs/audits/m2.md`](docs/audits/m2.md) |
+| **M3** | Multi-frame `Timeline`, nested `DefineSprite` clips, `DefineButton`/`DefineButton2` state machine & vector hit-testing, `DefineFont*`/`DefineText*`/`DefineEditText`, cursor reticle, `docs/keymap.md` | **Complete** | Green (`render_goldens.rs` passing; V3 [#5](https://github.com/wastaken90XD/Flash./issues/5), V4 [#6](https://github.com/wastaken90XD/Flash./issues/6)) | [`docs/audits/m3.md`](docs/audits/m3.md) |
+| **M4** | `swfr-avm1` (AS1/AS2 interpreter, generational `Heap`, incremental mark-and-sweep GC, `Vec<Op>` dispatch, built-in classes, deterministic timers, watchdog), 160-movie ES3 conformance suite | **Complete** | Green (160/160 conformance movies passing; V5 [#7](https://github.com/wastaken90XD/Flash./issues/7)) | [`docs/audits/m4.md`](docs/audits/m4.md) |
+| **M5** | `swfr-audio` (PCM, SWF IMA ADPCM 2/3/4/5-bit, MP3 via `symphonia 0.5.5`, 44.1 kHz stereo resampler, 32-voice `AudioMixer`, 300-frame marker-pulse stream sync test) | **Complete** | Green (marker-pulse sync test passing; V6 [#8](https://github.com/wastaken90XD/Flash./issues/8)) | [`docs/audits/m5.md`](docs/audits/m5.md) |
+| **M6** | 13-target `cross.yml` (with `armv7` QEMU user-mode ABI test & 25-symbol check), `release.yml`, `swfr-harness bench` (`0.186 ms/frame`, 30% regression gate), `README.md`, `docs/INSTALL.md`, `docs/KNOWN_LIMITATIONS.md` | **Complete** | Green ([cross.yml](https://github.com/wastaken90XD/Flash./actions/runs/38333151604), [release.yml](https://github.com/wastaken90XD/Flash./actions/runs/38333151663); V7 [#9](https://github.com/wastaken90XD/Flash./issues/9)) | [`docs/audits/m6.md`](docs/audits/m6.md) |
+| **M7** | `swfr-avm2` (ActionScript 3 / AVM2) | Deferred (v2 per TSD) | Stub crate compiles cleanly | N/A |

@@ -341,15 +341,23 @@ jobs:
                   subprocess.run(["gh", "api", "-X", "POST", f"repos/wastaken90XD/Flash./issues/{num}/labels", "-f", "labels[]=question"], check=False)
           PY
 
-          # Fix Issue #2 checklist formatting (replace literal \n sequences if present)
+          # Fix Issue #2 checklist formatting and ensure V1 (#2) is open alongside V2-V7 per TSD 3.1.10
           if gh api "repos/${GITHUB_REPOSITORY}/issues/2" >/dev/null 2>&1; then
             python3 - <<'PY'
           import json, subprocess
           raw = subprocess.check_output(["gh", "api", "repos/wastaken90XD/Flash./issues/2"]).decode()
           issue = json.loads(raw)
-          body = issue.get("body") or ""
-          if "\\n" in body:
-              fixed = body.replace("\\n", "\n")
-              subprocess.run(["gh", "api", "-X", "PATCH", "repos/wastaken90XD/Flash./issues/2", "-f", f"body={fixed}"], check=False)
+          body = (issue.get("body") or "").replace("\\n", "\n")
+          subprocess.run(["gh", "api", "-X", "PATCH", "repos/wastaken90XD/Flash./issues/2", "-f", "state=open", "-f", f"body={body}"], check=False)
           PY
           fi
+
+          # Remove any temporary lockfile diagnostic comments from PR #1
+          python3 - <<'PY'
+          import json, subprocess
+          raw = subprocess.check_output(["gh", "api", "repos/wastaken90XD/Flash./issues/1/comments?per_page=50"]).decode()
+          for c in json.loads(raw):
+              if "<!-- swfr-lockfile-diag -->" in (c.get("body") or ""):
+                  cid = c["id"]
+                  subprocess.run(["gh", "api", "-X", "DELETE", f"repos/wastaken90XD/Flash./issues/comments/{cid}"], check=False)
+          PY
