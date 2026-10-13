@@ -24,8 +24,7 @@ use swfr_libretro::ffi::{
     retro_set_input_poll, retro_set_input_state, retro_set_video_refresh, retro_system_av_info,
     retro_system_timing, retro_unload_game, retro_unserialize, RETRO_DEVICE_ID_POINTER_PRESSED,
     RETRO_DEVICE_ID_POINTER_X, RETRO_DEVICE_ID_POINTER_Y, RETRO_DEVICE_POINTER,
-    RETRO_ENVIRONMENT_GET_LOG_INTERFACE, RETRO_ENVIRONMENT_SET_PIXEL_FORMAT,
-    RETRO_MEMORY_SAVE_RAM,
+    RETRO_ENVIRONMENT_GET_LOG_INTERFACE, RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, RETRO_MEMORY_SAVE_RAM,
 };
 use swfr_reader::{ColorTransform, Matrix, Rect};
 use swfr_swf::{

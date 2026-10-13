@@ -1152,4 +1152,3 @@ pub fn copy_memory_bytes_from_ptr(data: *const c_void, len: usize) -> Vec<u8> {
     let slice = unsafe { core::slice::from_raw_parts(data.cast::<u8>(), len) };
     slice.to_vec()
 }
-

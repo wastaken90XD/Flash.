@@ -1168,7 +1168,9 @@ impl Avm1 {
                     }
                     _ => continue,
                 };
-                if 12_usize.saturating_add(payload.len()).saturating_add(line.len())
+                if 12_usize
+                    .saturating_add(payload.len())
+                    .saturating_add(line.len())
                     <= SAVE_RAM_SIZE
                 {
                     payload.extend_from_slice(line.as_bytes());
