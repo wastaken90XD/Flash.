@@ -10,7 +10,7 @@
 | `png` | `0.18.1` | `MIT OR Apache-2.0` | PNG decoding inside `DefineBitsJPEG2/3` and golden test verification |
 | `zune-jpeg` | `0.5.15` | `MIT OR Apache-2.0 OR Zlib` | JPEG decoding for `DefineBits`, `JPEGTables`, `DefineBitsJPEG2/3/4` |
 | `fontdue` | `0.9.4` | `MIT OR Apache-2.0 OR Zlib` | TrueType glyph outline and metric support |
-| `symphonia` | `0.6.1` | `MPL-2.0` | MP3 audio decoding (`DefineSound` and `SoundStreamBlock`) |
+| `symphonia` | `0.5.5` | `MPL-2.0` | MP3 audio decoding (`DefineSound` and `SoundStreamBlock`) |
 
 ## Reference Assets (`docs/reference/`)
 

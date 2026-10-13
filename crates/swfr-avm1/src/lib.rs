@@ -1735,7 +1735,7 @@ impl Avm1 {
         args: Vec<Value>,
         stage: &mut Stage,
         budget: &mut u64,
-        depth: usize,
+        _depth: usize,
     ) -> Value {
         let norm = normalize_key(fname, self.swf_version);
         match norm.as_str() {

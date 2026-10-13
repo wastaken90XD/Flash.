@@ -253,8 +253,9 @@ fn render_m2_linear_and_radial_gradients() {
     let movie_rad = Movie::parse(&b_rad.build()).expect("valid radial gradient SWF");
     let mut stage_rad = Stage::from_movie(&movie_rad);
     let _ = stage_rad.step_frame();
-    renderer.render_stage(&mut stage_rad, 1);
-    let fb_rad = renderer.xrgb8888();
+    let mut renderer_rad = Renderer::new(64, 64, 1);
+    renderer_rad.render_stage(&mut stage_rad, 1);
+    let fb_rad = renderer_rad.xrgb8888();
     // Center (32, 32) is yellow-ish (high green), edge (12, 32) is magenta-ish (low green)
     assert!(((fb_rad[32 * 64 + 32] >> 8) & 0xFF) > ((fb_rad[32 * 64 + 12] >> 8) & 0xFF));
     check_golden(
@@ -408,8 +409,9 @@ fn render_m2_lossless_bitmap_clip_mask_and_morph() {
     let movie_clip = Movie::parse(&b_clip.build()).expect("valid clip SWF");
     let mut stage_clip = Stage::from_movie(&movie_clip);
     let _ = stage_clip.step_frame();
-    renderer.render_stage(&mut stage_clip, 1);
-    let fb_clip = renderer.xrgb8888();
+    let mut renderer_clip = Renderer::new(64, 64, 1);
+    renderer_clip.render_stage(&mut stage_clip, 1);
+    let fb_clip = renderer_clip.xrgb8888();
     // Outside mask at (10, 32) is background #303030; inside mask at (32, 32) is green #00E040
     assert_eq!(fb_clip[32 * 64 + 10], 0x0030_3030);
     assert_eq!(fb_clip[32 * 64 + 32], 0x0000_E040);
@@ -465,8 +467,9 @@ fn render_m2_lossless_bitmap_clip_mask_and_morph() {
     let movie_morph = Movie::parse(&b_morph.build()).expect("valid morph SWF");
     let mut stage_morph = Stage::from_movie(&movie_morph);
     let _ = stage_morph.step_frame();
-    renderer.render_stage(&mut stage_morph, 1);
-    let fb_morph = renderer.xrgb8888();
+    let mut renderer_morph = Renderer::new(64, 64, 1);
+    renderer_morph.render_stage(&mut stage_morph, 1);
+    let fb_morph = renderer_morph.xrgb8888();
     assert_eq!(fb_morph[32 * 64 + 32], 0x007F_007F);
     check_golden(
         "m2_morph_shape_mid",
