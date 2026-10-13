@@ -60,8 +60,6 @@ jobs:
               )
               sys.exit(1)
 
-          # Verify no `unsafe` or `allow(unsafe_code)` exists outside crates/swfr-libretro/src/ffi.rs
-          # and the single `#[allow(unsafe_code)] pub mod ffi;` declaration in crates/swfr-libretro/src/lib.rs.
           allowed_ffi = {
               Path("crates/swfr-libretro/src/ffi.rs"),
               Path("crates/swfr-libretro/src/lib.rs"),
@@ -138,3 +136,65 @@ jobs:
           fi
           echo "### Core Library Build & Size Budget" >> "$GITHUB_STEP_SUMMARY"
           echo "- \`libswfr_libretro.so\`: \`${size_bytes}\` bytes (budget: \`< 6,291,456\` bytes)" >> "$GITHUB_STEP_SUMMARY"
+
+  ci-report:
+    needs: [lints, build-test, abi, cross-build]
+    if: always() && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Post or update sticky ci-report comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          RES_LINTS: ${{ needs.lints.result }}
+          RES_BUILD: ${{ needs.build-test.result }}
+          RES_ABI: ${{ needs.abi.result }}
+          RES_CROSS: ${{ needs.cross-build.result }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+
+          repo = os.environ["REPO"]
+          pr = os.environ["PR_NUMBER"]
+          sha = os.environ["SHA"][:7]
+          body = "\n".join([
+              "<!-- ci-report -->",
+              f"### `ci-report` (`{sha}`)",
+              "",
+              "| Job | Result |",
+              "| :--- | :--- |",
+              f"| `lints` | `{os.environ['RES_LINTS']}` |",
+              f"| `build-test` | `{os.environ['RES_BUILD']}` |",
+              f"| `abi` | `{os.environ['RES_ABI']}` |",
+              f"| `cross-build` | `{os.environ['RES_CROSS']}` |",
+          ])
+
+          comments_raw = subprocess.check_output(
+              ["gh", "api", f"repos/{repo}/issues/{pr}/comments"],
+              text=True,
+          )
+          comments = json.loads(comments_raw)
+          existing_id = None
+          for c in comments:
+              if "<!-- ci-report -->" in c.get("body", ""):
+                  existing_id = c["id"]
+                  break
+
+          if existing_id:
+              subprocess.check_call([
+                  "gh", "api", "-X", "PATCH",
+                  f"repos/{repo}/issues/comments/{existing_id}",
+                  "-f", f"body={body}",
+              ])
+          else:
+              subprocess.check_call([
+                  "gh", "api", "-X", "POST",
+                  f"repos/{repo}/issues/{pr}/comments",
+                  "-f", f"body={body}",
+              ])
+          PY

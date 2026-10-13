@@ -32,16 +32,21 @@ jobs:
           path: dist/linux-x86_64/
 
   cross-windows-x86_64:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: rustup show
-      - run: cargo build --release -p swfr-libretro --locked
+      - name: Install MinGW-w64 and Windows x86_64 Rust target
+        run: |
+          if ! command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1; then
+            sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64
+          fi
+          rustup target add x86_64-pc-windows-gnu
+      - run: cargo build --release --target x86_64-pc-windows-gnu -p swfr-libretro --locked
       - name: Package swfr_libretro.dll and check 6 MB budget
-        shell: bash
         run: |
           mkdir -p dist/windows-x86_64
-          cp target/release/swfr_libretro.dll dist/windows-x86_64/swfr_libretro.dll
+          cp target/x86_64-pc-windows-gnu/release/swfr_libretro.dll dist/windows-x86_64/swfr_libretro.dll
           cp swfr_libretro.info dist/windows-x86_64/swfr_libretro.info
           size_bytes=$(stat -c%s dist/windows-x86_64/swfr_libretro.dll)
           echo "swfr_libretro.dll (Windows x86_64): ${size_bytes} bytes"
