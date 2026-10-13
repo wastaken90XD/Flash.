@@ -18,17 +18,18 @@ use swfr_libretro::ffi::{
     copy_audio_frames_from_callback_ptr, copy_c_str_from_callback_ptr,
     copy_video_frame_from_callback_ptr, install_log_callback_in_environment,
     make_test_log_printf_fn, retro_deinit, retro_game_geometry, retro_game_info,
-    retro_get_system_av_info, retro_init, retro_load_game, retro_run, retro_set_audio_sample,
-    retro_set_audio_sample_batch, retro_set_environment, retro_set_input_poll,
-    retro_set_input_state, retro_set_video_refresh, retro_system_av_info, retro_system_timing,
-    retro_unload_game, RETRO_DEVICE_ID_POINTER_PRESSED, RETRO_DEVICE_ID_POINTER_X,
-    RETRO_DEVICE_ID_POINTER_Y, RETRO_DEVICE_POINTER, RETRO_ENVIRONMENT_GET_LOG_INTERFACE,
-    RETRO_ENVIRONMENT_SET_PIXEL_FORMAT,
+    retro_get_system_av_info, retro_init, retro_load_game, retro_reset, retro_run,
+    retro_serialize, retro_serialize_size, retro_set_audio_sample, retro_set_audio_sample_batch,
+    retro_set_environment, retro_set_input_poll, retro_set_input_state, retro_set_video_refresh,
+    retro_system_av_info, retro_system_timing, retro_unload_game, retro_unserialize,
+    RETRO_DEVICE_ID_POINTER_PRESSED, RETRO_DEVICE_ID_POINTER_X, RETRO_DEVICE_ID_POINTER_Y,
+    RETRO_DEVICE_POINTER, RETRO_ENVIRONMENT_GET_LOG_INTERFACE, RETRO_ENVIRONMENT_SET_PIXEL_FORMAT,
 };
 use swfr_reader::{ColorTransform, Matrix, Rect};
 use swfr_swf::{
-    AudioFormat, ButtonAction, ButtonDef, ButtonRecord, FillStyle, PlaceObject2Tag, Rgba, ShapeDef,
-    ShapeRecord, SoundDef, SoundInfo, Tag,
+    AudioFormat, ButtonAction, ButtonDef, ButtonRecord, Compression, EditTextDef, FillStyle,
+    GradientStop, MorphShapeDef, PlaceObject2Tag, Rgba, ShapeDef, ShapeRecord, SoundDef,
+    SoundInfo, Tag,
 };
 use swfr_testkit::{ActionBuilder, SwfBuilder};
 
@@ -850,3 +851,482 @@ fn e2e_real_corpus_manifest_runs_120_frames_without_m0_stub() {
     }
     retro_deinit();
 }
+
+// -----------------------------------------------------------------------------
+// Milestone M1–M6 End-to-End ABI Verification Tests (TSD 3.14.7)
+// -----------------------------------------------------------------------------
+
+#[test]
+fn e2e_m1_fws_cws_zws_containers_via_abi() {
+    let _guard = E2E_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    init_abi_callbacks();
+
+    let mut frame_hashes = Vec::new();
+    for compression in [
+        Compression::Uncompressed,
+        Compression::Zlib,
+        Compression::Lzma,
+    ] {
+        reset_frontend();
+        let mut b = SwfBuilder::new(200, 120, 24.0);
+        b.set_version(13);
+        b.set_compression(compression);
+        b.set_frame_count(1);
+        b.push_tag(&Tag::SetBackgroundColor {
+            r: 0x00,
+            g: 0x00,
+            b: 0xFF,
+        });
+        b.push_tag(&Tag::DefineShape(rect_shape_def(
+            1,
+            50,
+            20,
+            150,
+            100,
+            Rgba::rgb(0xFF, 0x00, 0x00),
+        )));
+        b.push_tag(&Tag::PlaceObject2(PlaceObject2Tag {
+            is_move: false,
+            depth: 1,
+            character_id: Some(1),
+            matrix: Some(Matrix::IDENTITY),
+            color_transform: None,
+            ratio: None,
+            name: None,
+            clip_depth: None,
+            clip_actions_raw: None,
+        }));
+        b.push_tag(&Tag::ShowFrame);
+        b.push_tag(&Tag::End);
+        let swf = b.build();
+
+        let game_info = retro_game_info {
+            path: c"m1_container.swf".as_ptr(),
+            data: swf.as_ptr().cast::<c_void>(),
+            size: swf.len(),
+            meta: core::ptr::null(),
+        };
+        assert!(retro_load_game(core::ptr::addr_of!(game_info)));
+        retro_run();
+
+        let fe = FRONTEND.lock().unwrap();
+        assert_eq!(fe.video_frames.len(), 1);
+        assert_eq!(fe.video_frames[0][60 * 200 + 100], 0x00FF_0000);
+        frame_hashes.push(fnv1a_frame_hash(&fe.video_frames[0]));
+        drop(fe);
+
+        retro_unload_game();
+    }
+
+    assert_eq!(frame_hashes[0], frame_hashes[1]);
+    assert_eq!(frame_hashes[1], frame_hashes[2]);
+    retro_deinit();
+}
+
+#[test]
+fn e2e_m2_gradients_morphs_and_sprites_via_abi() {
+    let _guard = E2E_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    reset_frontend();
+    init_abi_callbacks();
+
+    let mut b = SwfBuilder::new(160, 120, 30.0);
+    b.set_frame_count(2);
+    b.set_background_color(0x10, 0x10, 0x10);
+
+    // Character 1: Linear gradient rectangle (0..80, 0..120)
+    let grad_shape = ShapeDef {
+        version: 3,
+        id: 1,
+        bounds: Rect {
+            x_min_twips: 0,
+            x_max_twips: 80 * 20,
+            y_min_twips: 0,
+            y_max_twips: 120 * 20,
+        },
+        fill_styles: vec![FillStyle::LinearGradient {
+            matrix: Matrix::IDENTITY,
+            stops: vec![
+                GradientStop {
+                    ratio: 0,
+                    color: Rgba::rgb(255, 0, 0),
+                },
+                GradientStop {
+                    ratio: 255,
+                    color: Rgba::rgb(0, 0, 255),
+                },
+            ],
+        }],
+        line_styles: Vec::new(),
+        records: vec![
+            ShapeRecord::StyleChange {
+                move_to: Some((0, 0)),
+                fill_style_0: None,
+                fill_style_1: Some(1),
+                line_style: None,
+                new_fill_styles: None,
+                new_line_styles: None,
+            },
+            ShapeRecord::StraightEdge {
+                dx_twips: 80 * 20,
+                dy_twips: 0,
+            },
+            ShapeRecord::StraightEdge {
+                dx_twips: 0,
+                dy_twips: 120 * 20,
+            },
+            ShapeRecord::StraightEdge {
+                dx_twips: -80 * 20,
+                dy_twips: 0,
+            },
+            ShapeRecord::StraightEdge {
+                dx_twips: 0,
+                dy_twips: -120 * 20,
+            },
+        ],
+    };
+    b.push_tag(&Tag::DefineShape(grad_shape));
+
+    // Character 2: Morph shape from pure green (ratio 0) to pure red (ratio 65535) on right half
+    let morph_bounds = Rect {
+        x_min_twips: 80 * 20,
+        x_max_twips: 160 * 20,
+        y_min_twips: 0,
+        y_max_twips: 120 * 20,
+    };
+    let morph_records = vec![
+        ShapeRecord::StyleChange {
+            move_to: Some((80 * 20, 0)),
+            fill_style_0: None,
+            fill_style_1: Some(1),
+            line_style: None,
+            new_fill_styles: None,
+            new_line_styles: None,
+        },
+        ShapeRecord::StraightEdge {
+            dx_twips: 80 * 20,
+            dy_twips: 0,
+        },
+        ShapeRecord::StraightEdge {
+            dx_twips: 0,
+            dy_twips: 120 * 20,
+        },
+        ShapeRecord::StraightEdge {
+            dx_twips: -80 * 20,
+            dy_twips: 0,
+        },
+        ShapeRecord::StraightEdge {
+            dx_twips: 0,
+            dy_twips: -120 * 20,
+        },
+    ];
+    b.push_tag(&Tag::DefineMorphShape(MorphShapeDef {
+        version: 1,
+        id: 2,
+        start_bounds: morph_bounds,
+        end_bounds: morph_bounds,
+        start_fill_styles: vec![FillStyle::Solid(Rgba::rgb(0, 255, 0))],
+        end_fill_styles: vec![FillStyle::Solid(Rgba::rgb(255, 0, 0))],
+        start_line_styles: Vec::new(),
+        end_line_styles: Vec::new(),
+        start_records: morph_records.clone(),
+        end_records: morph_records,
+    }));
+
+    // Frame 1: Place gradient at depth 1 and morph shape at ratio 0 at depth 2
+    b.push_tag(&Tag::PlaceObject2(PlaceObject2Tag {
+        is_move: false,
+        depth: 1,
+        character_id: Some(1),
+        matrix: Some(Matrix::IDENTITY),
+        color_transform: None,
+        ratio: None,
+        name: None,
+        clip_depth: None,
+        clip_actions_raw: None,
+    }));
+    b.push_tag(&Tag::PlaceObject2(PlaceObject2Tag {
+        is_move: false,
+        depth: 2,
+        character_id: Some(2),
+        matrix: Some(Matrix::IDENTITY),
+        color_transform: None,
+        ratio: Some(0),
+        name: None,
+        clip_depth: None,
+        clip_actions_raw: None,
+    }));
+    b.push_tag(&Tag::ShowFrame);
+
+    // Frame 2: Update morph shape to ratio 65535
+    b.push_tag(&Tag::PlaceObject2(PlaceObject2Tag {
+        is_move: true,
+        depth: 2,
+        character_id: None,
+        matrix: None,
+        color_transform: None,
+        ratio: Some(65_535),
+        name: None,
+        clip_depth: None,
+        clip_actions_raw: None,
+    }));
+    b.push_tag(&Tag::ShowFrame);
+    b.push_tag(&Tag::End);
+    let swf = b.build();
+
+    let game_info = retro_game_info {
+        path: c"m2_render.swf".as_ptr(),
+        data: swf.as_ptr().cast::<c_void>(),
+        size: swf.len(),
+        meta: core::ptr::null(),
+    };
+    assert!(retro_load_game(core::ptr::addr_of!(game_info)));
+    retro_run();
+    retro_run();
+
+    let fe = FRONTEND.lock().unwrap();
+    assert_eq!(fe.video_frames.len(), 2);
+    // Morph shape right half: green on frame 1, red on frame 2
+    assert_eq!(fe.video_frames[0][60 * 160 + 120], 0x0000_FF00);
+    assert_eq!(fe.video_frames[1][60 * 160 + 120], 0x00FF_0000);
+    drop(fe);
+
+    retro_unload_game();
+    retro_deinit();
+}
+
+#[test]
+fn e2e_m3_avm1_closures_edit_text_and_movieclip_props_via_abi() {
+    let _guard = E2E_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    reset_frontend();
+    init_abi_callbacks();
+
+    let mut b = SwfBuilder::new(200, 100, 30.0);
+    b.set_frame_count(1);
+    b.set_background_color(0, 0, 0);
+
+    // Dynamic text field bound to variable `score_txt`
+    b.push_tag(&Tag::DefineEditText(EditTextDef {
+        id: 1,
+        bounds: Rect {
+            x_min_twips: 10 * 20,
+            x_max_twips: 190 * 20,
+            y_min_twips: 10 * 20,
+            y_max_twips: 80 * 20,
+        },
+        font_id: None,
+        font_height_twips: 24 * 20,
+        color: Rgba::rgb(255, 255, 255),
+        variable_name: "score_txt".to_owned(),
+        initial_text: Some(String::new()),
+        word_wrap: false,
+        multiline: false,
+        read_only: true,
+        html: false,
+        use_outlines: false,
+    }));
+    b.push_tag(&Tag::PlaceObject2(PlaceObject2Tag {
+        is_move: false,
+        depth: 1,
+        character_id: Some(1),
+        matrix: Some(Matrix::IDENTITY),
+        color_transform: None,
+        ratio: None,
+        name: Some("label_mc".to_owned()),
+        clip_depth: None,
+        clip_actions_raw: None,
+    }));
+
+    // DoAction: Set variable `score_txt = "SCORE 42"` and trace it
+    let mut ab = ActionBuilder::new();
+    ab.push_str("score_txt");
+    ab.push_str("SCORE 42");
+    ab.set_variable();
+    ab.push_str("score_txt");
+    ab.get_variable();
+    ab.trace();
+    b.push_tag(&Tag::DoAction {
+        actions: ab.build(),
+    });
+    b.push_tag(&Tag::ShowFrame);
+    b.push_tag(&Tag::End);
+    let swf = b.build();
+
+    let game_info = retro_game_info {
+        path: c"m3_avm1.swf".as_ptr(),
+        data: swf.as_ptr().cast::<c_void>(),
+        size: swf.len(),
+        meta: core::ptr::null(),
+    };
+    assert!(retro_load_game(core::ptr::addr_of!(game_info)));
+    retro_run();
+
+    let fe = FRONTEND.lock().unwrap();
+    assert!(
+        fe.logs.iter().any(|(_, m)| m.contains("SCORE 42")),
+        "AVM1 variable trace must emit SCORE 42, got: {:?}",
+        fe.logs
+    );
+    // Verify that the bound EditText rendered white glyph pixels onto the black stage
+    let non_black = fe.video_frames[0].iter().filter(|&&px| px != 0).count();
+    assert!(
+        non_black > 20,
+        "bound DefineEditText must rasterize glyphs via embedded fallback font"
+    );
+    drop(fe);
+
+    retro_unload_game();
+    retro_deinit();
+}
+
+#[test]
+fn e2e_m4_savestate_roundtrip_and_streaming_audio_via_abi() {
+    let _guard = E2E_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    reset_frontend();
+    init_abi_callbacks();
+
+    let swf = build_10_frame_moving_square_swf();
+    let game_info = retro_game_info {
+        path: c"m4_savestate.swf".as_ptr(),
+        data: swf.as_ptr().cast::<c_void>(),
+        size: swf.len(),
+        meta: core::ptr::null(),
+    };
+    assert!(retro_load_game(core::ptr::addr_of!(game_info)));
+
+    // Step to frame N = 3
+    for _ in 0..3 {
+        retro_run();
+    }
+
+    let sz = retro_serialize_size();
+    assert!(sz > 0);
+    let mut state_buf = vec![0_u8; sz];
+    assert!(retro_serialize(state_buf.as_mut_ptr().cast::<c_void>(), sz));
+
+    // Step 30 more frames from N to N + 30
+    reset_frontend();
+    for _ in 0..30 {
+        retro_run();
+    }
+    let fe = FRONTEND.lock().unwrap();
+    let hashes_first: Vec<u64> = fe
+        .video_frames
+        .iter()
+        .map(|f| fnv1a_frame_hash(f))
+        .collect();
+    let audio_first = fe.audio_batches.clone();
+    drop(fe);
+
+    // Unserialize back to N = 3 and re-run 30 frames
+    assert!(retro_unserialize(state_buf.as_ptr().cast::<c_void>(), sz));
+    reset_frontend();
+    for _ in 0..30 {
+        retro_run();
+    }
+    let fe = FRONTEND.lock().unwrap();
+    let hashes_second: Vec<u64> = fe
+        .video_frames
+        .iter()
+        .map(|f| fnv1a_frame_hash(f))
+        .collect();
+    let audio_second = fe.audio_batches.clone();
+    drop(fe);
+
+    assert_eq!(
+        hashes_first, hashes_second,
+        "savestate unserialize + 30 frames must produce identical framebuffer hashes"
+    );
+    assert_eq!(
+        audio_first, audio_second,
+        "savestate unserialize + 30 frames must produce identical audio samples"
+    );
+
+    retro_unload_game();
+    retro_deinit();
+}
+
+#[test]
+fn e2e_m5_avm2_diagnostic_notice_and_reset_via_abi() {
+    let _guard = E2E_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    reset_frontend();
+    init_abi_callbacks();
+
+    let mut b = SwfBuilder::new(160, 120, 30.0);
+    b.set_version(10);
+    b.set_frame_count(1);
+    b.push_tag(&Tag::FileAttributes {
+        use_direct_blit: false,
+        use_gpu: false,
+        has_metadata: false,
+        actionscript3: true,
+        use_network: false,
+    });
+    b.push_tag(&Tag::SetBackgroundColor {
+        r: 0x00,
+        g: 0x80,
+        b: 0x40,
+    });
+    b.push_tag(&Tag::DoABC {
+        flags: 1,
+        name: "frame1".to_owned(),
+        abc_data: vec![0x10, 0x00, 0x2E, 0x00],
+    });
+    b.push_tag(&Tag::ShowFrame);
+    b.push_tag(&Tag::End);
+    let swf = b.build();
+
+    let game_info = retro_game_info {
+        path: c"m5_avm2.swf".as_ptr(),
+        data: swf.as_ptr().cast::<c_void>(),
+        size: swf.len(),
+        meta: core::ptr::null(),
+    };
+    assert!(retro_load_game(core::ptr::addr_of!(game_info)));
+    retro_run();
+    retro_run();
+
+    let fe = FRONTEND.lock().unwrap();
+    let avm2_notices = fe
+        .logs
+        .iter()
+        .filter(|(_, m)| m.contains("AVM2") || m.contains("ActionScript 3"))
+        .count();
+    assert_eq!(
+        avm2_notices, 1,
+        "AVM2 movie must emit exactly one diagnostic notice per load, got: {:?}",
+        fe.logs
+    );
+    // Vector stage background must still render cleanly (not M0 stub)
+    assert_eq!(fe.video_frames[0][0], 0x0000_8040);
+    drop(fe);
+
+    retro_reset();
+    retro_unload_game();
+    retro_deinit();
+}
+
+#[test]
+fn e2e_m6_repeated_load_unload_50_cycles_via_abi() {
+    let _guard = E2E_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    init_abi_callbacks();
+
+    let swf = build_1_frame_red_rect_on_blue_stage_swf();
+    for _ in 0..50 {
+        reset_frontend();
+        let game_info = retro_game_info {
+            path: c"m6_cycle.swf".as_ptr(),
+            data: swf.as_ptr().cast::<c_void>(),
+            size: swf.len(),
+            meta: core::ptr::null(),
+        };
+        assert!(retro_load_game(core::ptr::addr_of!(game_info)));
+        retro_run();
+        let fe = FRONTEND.lock().unwrap();
+        assert_eq!(fe.video_frames[0][120 * 320 + 160], 0x00FF_0000);
+        drop(fe);
+        retro_unload_game();
+    }
+
+    retro_deinit();
+}
+

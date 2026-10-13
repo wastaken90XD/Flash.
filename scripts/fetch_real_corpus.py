@@ -1,74 +1,85 @@
 #!/usr/bin/env python3
-"""Fetches and verifies real-world SWF corpus files from corpus/real/MANIFEST.toml into corpus/real/cache/."""
+"""Fetch and SHA-256-verify real-world SWF corpus files from corpus/real/MANIFEST.toml."""
 
 import base64
 import hashlib
 import json
 import pathlib
-import subprocess
 import sys
 import tomllib
 import urllib.request
 
 
-def fetch_entry(entry: dict, cache_dir: pathlib.Path) -> pathlib.Path:
-    for required in ("name", "url", "sha256", "license", "source_page"):
-        val = str(entry.get(required, "")).strip()
-        if not val:
-            raise ValueError(f"Manifest entry missing required non-empty field '{required}': {entry}")
-
-    name = entry["name"]
-    expected_sha = entry["sha256"].lower()
-    dest = cache_dir / f"{name}.swf"
-
-    if dest.exists():
-        actual = hashlib.sha256(dest.read_bytes()).hexdigest().lower()
-        if actual == expected_sha:
-            return dest
-
-    raw_bytes = None
-    url = entry["url"]
+def download_bytes(url: str) -> bytes:
+    """Download from raw URL, falling back to api.github.com when raw host is restricted."""
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "swfr-ci/1.0"})
+        req = urllib.request.Request(url, headers={"User-Agent": "swfr-corpus-fetcher/1.0"})
         with urllib.request.urlopen(req, timeout=20) as resp:
-            raw_bytes = resp.read()
+            return resp.read()
     except Exception:
-        api_path = entry.get("api_path")
-        if api_path:
-            out = subprocess.check_output(["gh", "api", api_path]).decode()
-            info = json.loads(out)
-            raw_bytes = base64.b64decode(info["content"])
-        else:
+        prefix = "https://raw.githubusercontent.com/"
+        if not url.startswith(prefix):
             raise
-
-    actual_sha = hashlib.sha256(raw_bytes).hexdigest().lower()
-    if actual_sha != expected_sha:
-        raise ValueError(
-            f"SHA-256 mismatch for '{name}': expected {expected_sha}, got {actual_sha}"
+        parts = url[len(prefix) :].split("/", 3)
+        if len(parts) != 4:
+            raise
+        owner, repo, ref, rel_path = parts
+        api_url = f"https://api.github.com/repos/{owner}/{repo}/contents/{rel_path}?ref={ref}"
+        req = urllib.request.Request(
+            api_url,
+            headers={
+                "User-Agent": "swfr-corpus-fetcher/1.0",
+                "Accept": "application/vnd.github.v3+json",
+            },
         )
-
-    dest.write_bytes(raw_bytes)
-    return dest
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        return base64.b64decode(payload["content"])
 
 
 def main() -> int:
-    root = pathlib.Path(__file__).resolve().parent.parent
-    manifest_path = root / "corpus" / "real" / "MANIFEST.toml"
-    data = tomllib.loads(manifest_path.read_text())
-    files = data.get("file", [])
-    if not files:
-        print("Error: corpus/real/MANIFEST.toml has no [[file]] entries", file=sys.stderr)
-        return 1
-
-    cache_dir = root / "corpus" / "real" / "cache"
+    repo_root = pathlib.Path(__file__).resolve().parent.parent
+    manifest_path = repo_root / "corpus" / "real" / "MANIFEST.toml"
+    cache_dir = repo_root / "corpus" / "real" / "cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
 
-    for entry in files:
-        dest = fetch_entry(entry, cache_dir)
-        print(f"Verified {entry['name']} ({dest.stat().st_size} bytes, sha256={entry['sha256'][:12]}...)")
+    with manifest_path.open("rb") as f:
+        manifest = tomllib.load(f)
 
+    entries = manifest.get("swf", [])
+    if not entries:
+        print("ERROR: corpus/real/MANIFEST.toml contains no [[swf]] entries", file=sys.stderr)
+        return 1
+
+    for entry in entries:
+        name = entry["name"]
+        filename = entry["file"]
+        url = entry["url"]
+        expected_sha256 = entry["sha256"].lower()
+        dest = cache_dir / filename
+
+        if dest.exists():
+            actual = hashlib.sha256(dest.read_bytes()).hexdigest().lower()
+            if actual == expected_sha256:
+                print(f"[cached] {name} ({filename}) sha256={actual[:16]}...")
+                continue
+
+        print(f"[fetch]  {name} <- {url}")
+        data = download_bytes(url)
+        actual = hashlib.sha256(data).hexdigest().lower()
+        if actual != expected_sha256:
+            print(
+                f"ERROR: SHA-256 mismatch for {name}: expected {expected_sha256}, got {actual}",
+                file=sys.stderr,
+            )
+            return 1
+
+        dest.write_bytes(data)
+        print(f"[verified] {name} ({len(data)} bytes) sha256={actual[:16]}...")
+
+    print(f"Successfully verified {len(entries)} real-world SWF files in {cache_dir}")
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())

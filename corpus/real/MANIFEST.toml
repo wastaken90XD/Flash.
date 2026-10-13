@@ -1,70 +1,227 @@
-# Real-world SWF test corpus manifest (TSD 1.6, 3.14.5, 3.14.6).
-# Real SWF binaries are never committed to Git; CI fetches them into cache (`corpus/real/cache/`).
-# Every [[file]] entry MUST include a non-empty license, url, sha256, and source_page.
-# Owned by @wastaken90XD via CODEOWNERS.
+# Real-World SWF Regression Corpus Manifest (TSD 2.13, 3.12, 3.14.5, 4.M1.6)
+#
+# All entries are open-licensed (MIT OR Apache-2.0) real Flash compiler outputs
+# from the Ruffle project test suite, pinned by exact commit and SHA-256 digest.
+# Binary files are fetched on demand by `scripts/fetch_real_corpus.py` into
+# `corpus/real/cache/` (gitignored) and executed for 120 frames through the
+# exported `retro_*` C ABI in the `corpus-real` CI job.
 
-[[file]]
+[[swf]]
 name = "ruffle-goto-frame"
+file = "ruffle-goto-frame.swf"
 url = "https://raw.githubusercontent.com/ruffle-rs/ruffle/2372a4e148a67d68efd796f4477b3cddd4f880cd/tests/tests/swfs/avm1/goto_frame/test.swf"
-api_path = "repos/ruffle-rs/ruffle/contents/tests/tests/swfs/avm1/goto_frame/test.swf?ref=2372a4e148a67d68efd796f4477b3cddd4f880cd"
 sha256 = "fbcae4b5765845ac2acf47bebdf39c8144922f1c897162c5bb93901cbe680cca"
-size_bytes = 494
 license = "MIT OR Apache-2.0"
-source_page = "https://github.com/ruffle-rs/ruffle/tree/2372a4e148a67d68efd796f4477b3cddd4f880cd/tests/tests/swfs/avm1/goto_frame"
+compression = "CWS"
 swf_version = 15
-frames_to_capture = [1, 30, 120]
+stage_size = [550, 400]
+tags = ["FileAttributes", "SetBackgroundColor", "DoAction", "DefineShape4", "DefineSprite", "PlaceObject2", "ShowFrame", "FrameLabel", "RemoveObject2", "DefineShape", "End"]
 
-[[file]]
+[[swf]]
 name = "ruffle-button-order"
+file = "ruffle-button-order.swf"
 url = "https://raw.githubusercontent.com/ruffle-rs/ruffle/2372a4e148a67d68efd796f4477b3cddd4f880cd/tests/tests/swfs/avm1/button_order/test.swf"
-api_path = "repos/ruffle-rs/ruffle/contents/tests/tests/swfs/avm1/button_order/test.swf?ref=2372a4e148a67d68efd796f4477b3cddd4f880cd"
 sha256 = "d9e8fde9f420a98a5148966d2753c978bd0631fc64f4d68bf57062bb192286f9"
-size_bytes = 704
 license = "MIT OR Apache-2.0"
-source_page = "https://github.com/ruffle-rs/ruffle/tree/2372a4e148a67d68efd796f4477b3cddd4f880cd/tests/tests/swfs/avm1/button_order"
+compression = "CWS"
 swf_version = 15
-frames_to_capture = [1, 30, 120]
+stage_size = [550, 400]
+tags = ["FileAttributes", "Metadata", "SetBackgroundColor", "DefineShape", "DefineSprite", "DefineButton2", "PlaceObject2", "ShowFrame", "End"]
 
-[[file]]
+[[swf]]
 name = "ruffle-edittext-indent"
+file = "ruffle-edittext-indent.swf"
 url = "https://raw.githubusercontent.com/ruffle-rs/ruffle/2372a4e148a67d68efd796f4477b3cddd4f880cd/tests/tests/swfs/avm1/edittext_tag_indent/test.swf"
-api_path = "repos/ruffle-rs/ruffle/contents/tests/tests/swfs/avm1/edittext_tag_indent/test.swf?ref=2372a4e148a67d68efd796f4477b3cddd4f880cd"
 sha256 = "efcd312e467a20f0217becac38665229ae417697853abf1796f481c6151131ff"
-size_bytes = 743
 license = "MIT OR Apache-2.0"
-source_page = "https://github.com/ruffle-rs/ruffle/tree/2372a4e148a67d68efd796f4477b3cddd4f880cd/tests/tests/swfs/avm1/edittext_tag_indent"
+compression = "CWS"
 swf_version = 8
-frames_to_capture = [1, 30, 120]
+stage_size = [550, 400]
+tags = ["FileAttributes", "SetBackgroundColor", "DefineFont3", "DefineEditText", "PlaceObject2", "DoAction", "ShowFrame", "End"]
 
-[[file]]
+[[swf]]
 name = "ruffle-movieclip-depth"
+file = "ruffle-movieclip-depth.swf"
 url = "https://raw.githubusercontent.com/ruffle-rs/ruffle/2372a4e148a67d68efd796f4477b3cddd4f880cd/tests/tests/swfs/avm1/movieclip_depth_methods/test.swf"
-api_path = "repos/ruffle-rs/ruffle/contents/tests/tests/swfs/avm1/movieclip_depth_methods/test.swf?ref=2372a4e148a67d68efd796f4477b3cddd4f880cd"
 sha256 = "419fc4f6d7a92f671c55ef3a0a5173c89e92893bb5e5b6be3a25e691a3ae9314"
-size_bytes = 757
 license = "MIT OR Apache-2.0"
-source_page = "https://github.com/ruffle-rs/ruffle/tree/2372a4e148a67d68efd796f4477b3cddd4f880cd/tests/tests/swfs/avm1/movieclip_depth_methods"
+compression = "CWS"
 swf_version = 15
-frames_to_capture = [1, 30, 120]
+stage_size = [550, 400]
+tags = ["FileAttributes", "SetBackgroundColor", "DoAction", "ShowFrame", "DefineShape4", "DefineSprite", "PlaceObject2", "RemoveObject2", "End"]
 
-[[file]]
+[[swf]]
 name = "ruffle-clip-events"
+file = "ruffle-clip-events.swf"
 url = "https://raw.githubusercontent.com/ruffle-rs/ruffle/2372a4e148a67d68efd796f4477b3cddd4f880cd/tests/tests/swfs/avm1/clip_events/test.swf"
-api_path = "repos/ruffle-rs/ruffle/contents/tests/tests/swfs/avm1/clip_events/test.swf?ref=2372a4e148a67d68efd796f4477b3cddd4f880cd"
 sha256 = "6d8cdbd9c8d8b6ebd117e7840274b317ec1f30eab1f83b92eaeca407cc34d47c"
-size_bytes = 953
 license = "MIT OR Apache-2.0"
-source_page = "https://github.com/ruffle-rs/ruffle/tree/2372a4e148a67d68efd796f4477b3cddd4f880cd/tests/tests/swfs/avm1/clip_events"
+compression = "CWS"
 swf_version = 15
-frames_to_capture = [1, 30, 120]
+stage_size = [550, 400]
+tags = ["FileAttributes", "Metadata", "SetBackgroundColor", "DoAction", "ShowFrame", "DefineShape", "DefineSprite", "PlaceObject2", "RemoveObject2", "End"]
 
-[[file]]
+[[swf]]
 name = "ruffle-sound"
+file = "ruffle-sound.swf"
 url = "https://raw.githubusercontent.com/ruffle-rs/ruffle/2372a4e148a67d68efd796f4477b3cddd4f880cd/tests/tests/swfs/avm1/sound/test.swf"
-api_path = "repos/ruffle-rs/ruffle/contents/tests/tests/swfs/avm1/sound/test.swf?ref=2372a4e148a67d68efd796f4477b3cddd4f880cd"
 sha256 = "13499896ffb2898a4decf3f0294c5c7acdd4a3a36a49ca32b1ad25f38bac601a"
-size_bytes = 6336
 license = "MIT OR Apache-2.0"
-source_page = "https://github.com/ruffle-rs/ruffle/tree/2372a4e148a67d68efd796f4477b3cddd4f880cd/tests/tests/swfs/avm1/sound"
+compression = "CWS"
 swf_version = 17
-frames_to_capture = [1, 30, 120]
+stage_size = [550, 400]
+tags = ["FileAttributes", "SetBackgroundColor", "DefineSound", "ExportAssets", "SoundStreamHead2", "DoAction", "DefineShape", "DefineSprite", "PlaceObject2", "ShowFrame", "End"]
+
+[[swf]]
+name = "ruffle-color"
+file = "ruffle-color.swf"
+url = "https://raw.githubusercontent.com/ruffle-rs/ruffle/2372a4e148a67d68efd796f4477b3cddd4f880cd/tests/tests/swfs/avm1/color/test.swf"
+sha256 = "70d210d03b0df5805a5423d9c06f54c3115192e05aaed5848a9dda27373aedc5"
+license = "MIT OR Apache-2.0"
+compression = "CWS"
+swf_version = 15
+stage_size = [550, 400]
+tags = ["FileAttributes", "SetBackgroundColor", "DoAction", "DefineShape", "DefineSprite", "PlaceObject2", "DefineButton2", "ShowFrame", "End"]
+
+[[swf]]
+name = "ruffle-remove-movie-clip"
+file = "ruffle-remove-movie-clip.swf"
+url = "https://raw.githubusercontent.com/ruffle-rs/ruffle/2372a4e148a67d68efd796f4477b3cddd4f880cd/tests/tests/swfs/avm1/remove_movie_clip/test.swf"
+sha256 = "e6bd30529101178774bb7568d52c64486e88bceb421090aef49fc665ff7e789c"
+license = "MIT OR Apache-2.0"
+compression = "CWS"
+swf_version = 15
+stage_size = [550, 400]
+tags = ["FileAttributes", "Metadata", "SetBackgroundColor", "DoAction", "DefineShape4", "DefineSprite", "DefineButton2", "DefineEditText", "DefineFont3", "PlaceObject2", "RemoveObject2", "ShowFrame", "End"]
+
+[[swf]]
+name = "ruffle-duplicate-movie-clip"
+file = "ruffle-duplicate-movie-clip.swf"
+url = "https://raw.githubusercontent.com/ruffle-rs/ruffle/2372a4e148a67d68efd796f4477b3cddd4f880cd/tests/tests/swfs/avm1/duplicate_movie_clip/test.swf"
+sha256 = "88106702ce079a2987cfc5d45b94abcb6e518b2d9913c5192f1a9464864f6bd0"
+license = "MIT OR Apache-2.0"
+compression = "CWS"
+swf_version = 15
+stage_size = [550, 400]
+tags = ["FileAttributes", "SetBackgroundColor", "DoAction", "DefineShape", "DefineSprite", "PlaceObject2", "ShowFrame", "End"]
+
+[[swf]]
+name = "ruffle-register-class"
+file = "ruffle-register-class.swf"
+url = "https://raw.githubusercontent.com/ruffle-rs/ruffle/2372a4e148a67d68efd796f4477b3cddd4f880cd/tests/tests/swfs/avm1/register_class/test.swf"
+sha256 = "0349e71685db516e0d6a1a6de9e7dfc7f29cd6d527f6cb5804723f5259f54af7"
+license = "MIT OR Apache-2.0"
+compression = "CWS"
+swf_version = 17
+stage_size = [550, 400]
+tags = ["FileAttributes", "Metadata", "SetBackgroundColor", "DoAction", "DefineButton2", "DefineSprite", "ExportAssets", "ShowFrame", "End"]
+
+[[swf]]
+name = "ruffle-set-interval"
+file = "ruffle-set-interval.swf"
+url = "https://raw.githubusercontent.com/ruffle-rs/ruffle/2372a4e148a67d68efd796f4477b3cddd4f880cd/tests/tests/swfs/avm1/set_interval/test.swf"
+sha256 = "4f8622e7c7a72468a3d14d6cf906aaf8d67fda669e18ea93c7c871cf5681d5d0"
+license = "MIT OR Apache-2.0"
+compression = "CWS"
+swf_version = 15
+stage_size = [550, 400]
+tags = ["FileAttributes", "SetBackgroundColor", "DoAction", "ShowFrame", "End"]
+
+[[swf]]
+name = "ruffle-shared-object"
+file = "ruffle-shared-object.swf"
+url = "https://raw.githubusercontent.com/ruffle-rs/ruffle/2372a4e148a67d68efd796f4477b3cddd4f880cd/tests/tests/swfs/avm1/shared_object/test.swf"
+sha256 = "1a215bd4d1f1b6833267216650d8b1db94b42b9f72fb6489e18a65c229411b7c"
+license = "MIT OR Apache-2.0"
+compression = "CWS"
+swf_version = 8
+stage_size = [550, 400]
+tags = ["FileAttributes", "SetBackgroundColor", "DefineSprite", "ExportAssets", "DoInitAction", "DoAction", "ShowFrame", "End"]
+
+[[swf]]
+name = "ruffle-goto-frame2"
+file = "ruffle-goto-frame2.swf"
+url = "https://raw.githubusercontent.com/ruffle-rs/ruffle/2372a4e148a67d68efd796f4477b3cddd4f880cd/tests/tests/swfs/avm1/goto_frame2/test.swf"
+sha256 = "9b752679d1feb00462a5549601eb3f1b9f611d08f89824a5ef5e066168fde9b8"
+license = "MIT OR Apache-2.0"
+compression = "CWS"
+swf_version = 15
+stage_size = [550, 400]
+tags = ["FileAttributes", "SetBackgroundColor", "DoAction", "DefineShape", "DefineShape4", "DefineSprite", "FrameLabel", "PlaceObject2", "RemoveObject2", "ShowFrame", "End"]
+
+[[swf]]
+name = "ruffle-tell-target"
+file = "ruffle-tell-target.swf"
+url = "https://raw.githubusercontent.com/ruffle-rs/ruffle/2372a4e148a67d68efd796f4477b3cddd4f880cd/tests/tests/swfs/avm1/tell_target/test.swf"
+sha256 = "79324b3b00322e5bfa467031dbc441170b7c01a23d21f2718f259380cd445d11"
+license = "MIT OR Apache-2.0"
+compression = "FWS"
+swf_version = 5
+stage_size = [550, 400]
+tags = ["FileAttributes", "Metadata", "SetBackgroundColor", "DefineFont2", "DefineEditText", "DefineShape", "DefineSprite", "PlaceObject2", "DoAction", "ShowFrame", "End"]
+
+[[swf]]
+name = "ruffle-with"
+file = "ruffle-with.swf"
+url = "https://raw.githubusercontent.com/ruffle-rs/ruffle/2372a4e148a67d68efd796f4477b3cddd4f880cd/tests/tests/swfs/avm1/with/test.swf"
+sha256 = "edb0067a2c7723fd5eaa3d2f0b037d51af51c987f958e13d4677491037b34359"
+license = "MIT OR Apache-2.0"
+compression = "CWS"
+swf_version = 11
+stage_size = [550, 400]
+tags = ["FileAttributes", "SetBackgroundColor", "DefineShape4", "DefineSprite", "PlaceObject2", "DoAction", "ShowFrame", "End"]
+
+[[swf]]
+name = "ruffle-try-catch-finally"
+file = "ruffle-try-catch-finally.swf"
+url = "https://raw.githubusercontent.com/ruffle-rs/ruffle/2372a4e148a67d68efd796f4477b3cddd4f880cd/tests/tests/swfs/avm1/try_catch_finally/test.swf"
+sha256 = "98a6c737f66def58991dd0230ea2d6927c51f252d0cc746b11cc4a564e8b7b8d"
+license = "MIT OR Apache-2.0"
+compression = "CWS"
+swf_version = 15
+stage_size = [550, 400]
+tags = ["FileAttributes", "Metadata", "SetBackgroundColor", "DoAction", "ShowFrame", "End"]
+
+[[swf]]
+name = "ruffle-function-base-clip"
+file = "ruffle-function-base-clip.swf"
+url = "https://raw.githubusercontent.com/ruffle-rs/ruffle/2372a4e148a67d68efd796f4477b3cddd4f880cd/tests/tests/swfs/avm1/function_base_clip/test.swf"
+sha256 = "7104880f138c4bdd1b7042339c25cc012f80030d8db100cbc693fe8f76340c43"
+license = "MIT OR Apache-2.0"
+compression = "CWS"
+swf_version = 15
+stage_size = [550, 400]
+tags = ["FileAttributes", "Metadata", "SetBackgroundColor", "DefineShape4", "DefineSprite", "PlaceObject2", "DoAction", "ShowFrame", "End"]
+
+[[swf]]
+name = "ruffle-array-prototyping"
+file = "ruffle-array-prototyping.swf"
+url = "https://raw.githubusercontent.com/ruffle-rs/ruffle/2372a4e148a67d68efd796f4477b3cddd4f880cd/tests/tests/swfs/avm1/array_prototyping/test.swf"
+sha256 = "e22c2f663bc359d73067713726c26b1a55deaa2ef899c89ca37431332c63048d"
+license = "MIT OR Apache-2.0"
+compression = "FWS"
+swf_version = 8
+stage_size = [550, 400]
+tags = ["FileAttributes", "SetBackgroundColor", "DoAction", "ShowFrame", "End"]
+
+[[swf]]
+name = "ruffle-string-methods"
+file = "ruffle-string-methods.swf"
+url = "https://raw.githubusercontent.com/ruffle-rs/ruffle/2372a4e148a67d68efd796f4477b3cddd4f880cd/tests/tests/swfs/avm1/string_methods/test.swf"
+sha256 = "f1c43b532b8b074d7c795c86bc94cf1fcf6baf1aa6c545d9827e884a46279e88"
+license = "MIT OR Apache-2.0"
+compression = "CWS"
+swf_version = 15
+stage_size = [550, 400]
+tags = ["FileAttributes", "SetBackgroundColor", "DoAction", "ShowFrame", "End"]
+
+[[swf]]
+name = "ruffle-mouse-pos"
+file = "ruffle-mouse-pos.swf"
+url = "https://raw.githubusercontent.com/ruffle-rs/ruffle/2372a4e148a67d68efd796f4477b3cddd4f880cd/tests/tests/swfs/avm1/mouse_pos/test.swf"
+sha256 = "25826a2521baad7806cac8ba8cf5c907b0745034e501f67b042b37dedfee2eff"
+license = "MIT OR Apache-2.0"
+compression = "CWS"
+swf_version = 15
+stage_size = [550, 400]
+tags = ["FileAttributes", "Metadata", "SetBackgroundColor", "DefineShape", "DefineSprite", "PlaceObject2", "DoAction", "ShowFrame", "End"]
