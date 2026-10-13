@@ -553,7 +553,7 @@ impl Player {
                     )
                 });
                 if is_avm2 {
-                    self.logs.push(LogRecord {
+                    self.logs.push(LogLine {
                         level: LogLevel::Warn,
                         message: "[swfr] Notice: AVM2 (ActionScript 3 / DoABC) movie detected; AVM2 bytecode is not executed in v1, rendering vector timeline.".to_owned(),
                     });
