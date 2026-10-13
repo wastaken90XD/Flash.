@@ -1268,7 +1268,9 @@ fn e2e_m5_avm2_diagnostic_notice_and_reset_via_abi() {
     });
     b.push_tag(&Tag::Unknown {
         code: 82,
-        raw: vec![0x01, 0x00, 0x00, 0x00, b'f', b'1', 0x00, 0x10, 0x00, 0x2E, 0x00],
+        raw: vec![
+            0x01, 0x00, 0x00, 0x00, b'f', b'1', 0x00, 0x10, 0x00, 0x2E, 0x00,
+        ],
     });
     b.push_tag(&Tag::ShowFrame);
     b.push_tag(&Tag::End);
