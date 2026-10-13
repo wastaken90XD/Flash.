@@ -341,11 +341,12 @@ pub fn build_benchmark_swf() -> Vec<u8> {
 }
 
 fn locate_workspace_root() -> PathBuf {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     manifest_dir
         .parent()
         .and_then(Path::parent)
-        .map_or(manifest_dir, Path::to_path_buf)
+        .unwrap_or(manifest_dir)
+        .to_path_buf()
 }
 
 /// Locates and loads the largest real `.swf` file from `corpus/real/cache/` (fetching via

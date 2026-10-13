@@ -627,8 +627,9 @@ fn e2e_button_movie_scripted_pointer_click_changes_frame() {
     }));
     let mut stop_ab = ActionBuilder::new();
     stop_ab.stop();
+    let stop_bytes = stop_ab.build();
     b.push_tag(&Tag::DoAction {
-        actions: stop_ab.build(),
+        actions: stop_bytes.clone(),
     });
     b.push_tag(&Tag::ShowFrame);
 
@@ -646,7 +647,7 @@ fn e2e_button_movie_scripted_pointer_click_changes_frame() {
         clip_actions_raw: None,
     }));
     b.push_tag(&Tag::DoAction {
-        actions: stop_ab.build(),
+        actions: stop_bytes,
     });
     b.push_tag(&Tag::ShowFrame);
 
@@ -741,11 +742,12 @@ fn e2e_malformed_files_return_false_from_retro_load_game() {
 // ============================================================================
 
 fn locate_workspace_root() -> PathBuf {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     manifest_dir
         .parent()
         .and_then(Path::parent)
-        .map_or(manifest_dir, Path::to_path_buf)
+        .unwrap_or(manifest_dir)
+        .to_path_buf()
 }
 
 fn parse_manifest_names(manifest_text: &str) -> Vec<String> {
