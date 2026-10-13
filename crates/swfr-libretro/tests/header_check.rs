@@ -1,5 +1,12 @@
 //! Automated verification of `swfr_libretro::ffi` constants against `docs/reference/libretro.h`
 //! and `swfr_libretro.info` field names against `docs/reference/00_example_libretro.info` (TSD 2.5, 2.12 M0).
+#![allow(
+    clippy::panic,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects
+)]
 
 use std::collections::HashMap;
 use std::path::PathBuf;

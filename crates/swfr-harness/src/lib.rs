@@ -22,6 +22,13 @@ pub fn inspect_av_info(swf_bytes: &[u8]) -> Result<AvInfo, PlayerError> {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::panic,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects
+)]
 mod tests {
     use super::*;
 

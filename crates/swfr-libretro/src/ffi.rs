@@ -1028,7 +1028,7 @@ pub extern "C" fn retro_run() {
         }
 
         if let Some(a_cb) = audio_batch_cb {
-            let stereo_frames = step.audio_samples.len() / 2;
+            let stereo_frames = step.audio_samples.len().checked_div(2).unwrap_or(0);
             let _ = a_cb(step.audio_samples.as_ptr(), stereo_frames);
         }
     });

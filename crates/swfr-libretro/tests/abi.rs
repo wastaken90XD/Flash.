@@ -1,4 +1,11 @@
 //! Mock frontend ABI integration test for `swfr_libretro` (TSD 2.12 M0, 2.13).
+#![allow(
+    clippy::panic,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects
+)]
 //!
 //! Drives the exported `extern "C"` libretro entrypoints and asserts:
 //! - `retro_api_version` matches `RETRO_API_VERSION`.
