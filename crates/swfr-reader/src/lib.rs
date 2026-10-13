@@ -37,7 +37,11 @@ pub struct ParseError {
 
 impl core::fmt::Display for ParseError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "parse error at byte offset {}: {:?}", self.offset, self.kind)
+        write!(
+            f,
+            "parse error at byte offset {}: {:?}",
+            self.offset, self.kind
+        )
     }
 }
 
@@ -128,14 +132,12 @@ impl Matrix {
     pub fn transform_twips(self, x_twips: i32, y_twips: i32) -> (i32, i32) {
         let x64 = i64::from(x_twips);
         let y64 = i64::from(y_twips);
-        let out_x = ((x64 * i64::from(self.scale_x_fp16)
-            + y64 * i64::from(self.rotate_skew1_fp16))
-            >> 16)
-            + i64::from(self.translate_x_twips);
-        let out_y = ((x64 * i64::from(self.rotate_skew0_fp16)
-            + y64 * i64::from(self.scale_y_fp16))
-            >> 16)
-            + i64::from(self.translate_y_twips);
+        let out_x =
+            ((x64 * i64::from(self.scale_x_fp16) + y64 * i64::from(self.rotate_skew1_fp16)) >> 16)
+                + i64::from(self.translate_x_twips);
+        let out_y =
+            ((x64 * i64::from(self.rotate_skew0_fp16) + y64 * i64::from(self.scale_y_fp16)) >> 16)
+                + i64::from(self.translate_y_twips);
         (
             i32::try_from(out_x).unwrap_or(0),
             i32::try_from(out_y).unwrap_or(0),

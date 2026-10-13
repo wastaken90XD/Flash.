@@ -249,7 +249,9 @@ checksum = "6637bab7722d379c8b41ba849228d680cc12d0a45ba1fa2b48f2a30577a06731"
 name = "swfr-audio"
 version = "0.1.0"
 dependencies = [
+ "swfr-reader",
  "swfr-swf",
+ "swfr-testkit",
  "symphonia",
 ]
 
@@ -257,8 +259,10 @@ dependencies = [
 name = "swfr-avm1"
 version = "0.1.0"
 dependencies = [
+ "swfr-reader",
  "swfr-scene",
  "swfr-swf",
+ "swfr-testkit",
 ]
 
 [[package]]
@@ -272,8 +276,15 @@ dependencies = [
 name = "swfr-harness"
 version = "0.1.0"
 dependencies = [
- "png",
+ "swfr-audio",
+ "swfr-avm1",
+ "swfr-libretro",
  "swfr-player",
+ "swfr-reader",
+ "swfr-render",
+ "swfr-scene",
+ "swfr-swf",
+ "swfr-testkit",
 ]
 
 [[package]]
@@ -290,9 +301,11 @@ dependencies = [
  "swfr-audio",
  "swfr-avm1",
  "swfr-avm2",
+ "swfr-reader",
  "swfr-render",
  "swfr-scene",
  "swfr-swf",
+ "swfr-testkit",
 ]
 
 [[package]]
@@ -304,8 +317,12 @@ name = "swfr-render"
 version = "0.1.0"
 dependencies = [
  "fontdue",
+ "miniz_oxide 0.9.1",
  "png",
+ "swfr-reader",
  "swfr-scene",
+ "swfr-swf",
+ "swfr-testkit",
  "tiny-skia",
  "zune-jpeg",
 ]
@@ -314,7 +331,11 @@ dependencies = [
 name = "swfr-scene"
 version = "0.1.0"
 dependencies = [
+ "miniz_oxide 0.9.1",
+ "png",
+ "swfr-reader",
  "swfr-swf",
+ "zune-jpeg",
 ]
 
 [[package]]
@@ -330,7 +351,10 @@ dependencies = [
 name = "swfr-testkit"
 version = "0.1.0"
 dependencies = [
+ "lzma-rs",
+ "miniz_oxide 0.9.1",
  "png",
+ "swfr-reader",
  "swfr-swf",
 ]
 

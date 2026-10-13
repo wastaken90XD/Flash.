@@ -381,7 +381,8 @@ pub fn flatten_morph_shape(morph: &MorphShapeDef, ratio: u16) -> FlattenedShape 
                         } => {
                             let hdx = *edx / 2;
                             let hdy = *edy / 2;
-                            end_curve = (hdx, hdy, edx.saturating_sub(hdx), edy.saturating_sub(hdy));
+                            end_curve =
+                                (hdx, hdy, edx.saturating_sub(hdx), edy.saturating_sub(hdy));
                             break;
                         }
                         ShapeRecord::StyleChange { .. } => {}
@@ -580,7 +581,7 @@ fn stitch_edges(edges: &[DirectedEdge], close_contours: bool) -> Vec<PathCmd> {
         if used.get(start_idx).copied().unwrap_or(true) {
             continue;
         }
-        if let Some( used_flag) = used.get_mut(start_idx) {
+        if let Some(used_flag) = used.get_mut(start_idx) {
             *used_flag = true;
         }
         let Some(&first) = edges.get(start_idx) else {
@@ -954,7 +955,9 @@ impl Timeline {
         if frame_tag_ranges.is_empty() && !tags.is_empty() {
             frame_tag_ranges.push((0, tags.len()));
         }
-        let effective_count = frame_count.max(u16::try_from(frame_tag_ranges.len()).unwrap_or(1)).max(1);
+        let effective_count = frame_count
+            .max(u16::try_from(frame_tag_ranges.len()).unwrap_or(1))
+            .max(1);
 
         Self {
             frame_count: effective_count,
@@ -1058,12 +1061,9 @@ impl Stage {
                     self.jpeg_tables = Some(jpeg_data.clone());
                 }
                 Tag::DefineBits { id, jpeg_data } => {
-                    if let Some(bmp) = decode_jpeg_or_png_bitmap(
-                        *id,
-                        self.jpeg_tables.as_deref(),
-                        jpeg_data,
-                        None,
-                    ) {
+                    if let Some(bmp) =
+                        decode_jpeg_or_png_bitmap(*id, self.jpeg_tables.as_deref(), jpeg_data, None)
+                    {
                         self.dictionary.insert(*id, Character::Bitmap(bmp));
                     }
                 }
@@ -1097,9 +1097,7 @@ impl Stage {
                 Tag::DefineFont(f) => {
                     self.dictionary.insert(f.id, Character::Font(f.clone()));
                 }
-                Tag::DefineFontInfo {
-                    font_id, codes, ..
-                } => {
+                Tag::DefineFontInfo { font_id, codes, .. } => {
                     self.font_codes.insert(*font_id, codes.clone());
                     if let Some(Character::Font(f)) = self.dictionary.get_mut(font_id) {
                         f.codes.clone_from(codes);
@@ -1129,7 +1127,8 @@ impl Stage {
                     );
                 }
                 Tag::DefineSound(snd) => {
-                    self.dictionary.insert(snd.id, Character::Sound(snd.clone()));
+                    self.dictionary
+                        .insert(snd.id, Character::Sound(snd.clone()));
                 }
                 _ => {}
             }
@@ -1165,7 +1164,12 @@ impl Stage {
 
     /// Jumps the root timeline (or a named child sprite timeline) to `target_frame` (0-based)
     /// and reconstructs the display list from frame `0..=target_frame`.
-    pub fn goto_frame(&mut self, target_path: &str, target_frame: u16, play_after: bool) -> FrameEvents {
+    pub fn goto_frame(
+        &mut self,
+        target_path: &str,
+        target_frame: u16,
+        play_after: bool,
+    ) -> FrameEvents {
         let mut events = FrameEvents::default();
         let dict = self.dictionary.clone();
         let mut bg = self.background_color;
@@ -1183,7 +1187,9 @@ impl Stage {
                 &mut events,
             );
         } else {
-            let clean = target_path.trim_start_matches("_root.").trim_start_matches('/');
+            let clean = target_path
+                .trim_start_matches("_root.")
+                .trim_start_matches('/');
             for obj in self.root.display_list.values_mut() {
                 if obj.name.as_deref() == Some(clean) {
                     if let Some(ref mut st) = obj.sprite_timeline {
@@ -1208,12 +1214,7 @@ impl Stage {
 
     /// Updates pointer coordinates (in stage twips) and button state, returning any triggered
     /// button action scripts (`DefineButton` / `DefineButton2`).
-    pub fn update_pointer(
-        &mut self,
-        x_twips: i32,
-        y_twips: i32,
-        pressed: bool,
-    ) -> FrameEvents {
+    pub fn update_pointer(&mut self, x_twips: i32, y_twips: i32, pressed: bool) -> FrameEvents {
         let was_down = self.pointer_down;
         self.pointer_twips = (x_twips, y_twips);
         self.pointer_down = pressed;
@@ -1256,7 +1257,14 @@ impl Stage {
                         if inside {
                             (ButtonState::Over, 0)
                         } else {
-                            (ButtonState::Up, if state == ButtonState::Over { 0x0002 } else { 0 })
+                            (
+                                ButtonState::Up,
+                                if state == ButtonState::Over {
+                                    0x0002
+                                } else {
+                                    0
+                                },
+                            )
                         }
                     }
                     (state, _, _, _) => (state, 0),
@@ -1269,7 +1277,9 @@ impl Stage {
                 if cond_mask != 0 {
                     for act in &btn.actions {
                         if (act.condition & cond_mask) != 0 && !act.actions.is_empty() {
-                            events.actions.push(("_root".to_owned(), act.actions.clone()));
+                            events
+                                .actions
+                                .push(("_root".to_owned(), act.actions.clone()));
                         }
                     }
                 }
@@ -1307,7 +1317,9 @@ impl Stage {
             x_min: 0,
             x_max: i32::try_from(self.width_px).unwrap_or(0).saturating_mul(20),
             y_min: 0,
-            y_max: i32::try_from(self.height_px).unwrap_or(0).saturating_mul(20),
+            y_max: i32::try_from(self.height_px)
+                .unwrap_or(0)
+                .saturating_mul(20),
         });
     }
 }
@@ -1436,11 +1448,7 @@ fn execute_timeline_frame_tags(
     }
 }
 
-fn apply_place_object1(
-    tl: &mut Timeline,
-    po: &PlaceObjectTag,
-    dict: &BTreeMap<u16, Character>,
-) {
+fn apply_place_object1(tl: &mut Timeline, po: &PlaceObjectTag, dict: &BTreeMap<u16, Character>) {
     let (dynamic_text, sprite_timeline) = init_instance_state(po.character_id, dict);
     tl.display_list.insert(
         po.depth,
@@ -1502,7 +1510,10 @@ fn apply_place_object2(
         .color_transform
         .or_else(|| prev.as_ref().map(|p| p.color_transform))
         .unwrap_or(ColorTransform::IDENTITY);
-    let ratio = po2.ratio.or_else(|| prev.as_ref().map(|p| p.ratio)).unwrap_or(0);
+    let ratio = po2
+        .ratio
+        .or_else(|| prev.as_ref().map(|p| p.ratio))
+        .unwrap_or(0);
     let name = po2
         .name
         .clone()
@@ -1560,7 +1571,8 @@ pub fn hit_test_button(
     stage_x_twips: i32,
     stage_y_twips: i32,
 ) -> bool {
-    let Some((bx, by)) = invert_matrix_point(btn_matrix, stage_x_twips as f32, stage_y_twips as f32)
+    let Some((bx, by)) =
+        invert_matrix_point(btn_matrix, stage_x_twips as f32, stage_y_twips as f32)
     else {
         return false;
     };

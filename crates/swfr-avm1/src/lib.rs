@@ -346,7 +346,8 @@ impl Heap {
         let arr = obj.array.as_mut()?;
         let res = f(arr);
         let new_len = arr.len() as f64;
-        obj.props.insert("length".to_owned(), Value::Number(new_len));
+        obj.props
+            .insert("length".to_owned(), Value::Number(new_len));
         Some(res)
     }
 
@@ -399,7 +400,8 @@ impl Heap {
             if norm_key == "length" {
                 let new_len = val.to_u32(swf_version) as usize;
                 arr.resize(new_len.min(65536), Value::Undefined);
-                obj.props.insert("length".to_owned(), Value::Number(arr.len() as f64));
+                obj.props
+                    .insert("length".to_owned(), Value::Number(arr.len() as f64));
                 return;
             }
             if let Ok(idx) = norm_key.parse::<usize>() {
@@ -408,7 +410,8 @@ impl Heap {
                         arr.resize(idx.saturating_add(1), Value::Undefined);
                     }
                     arr[idx] = val;
-                    obj.props.insert("length".to_owned(), Value::Number(arr.len() as f64));
+                    obj.props
+                        .insert("length".to_owned(), Value::Number(arr.len() as f64));
                     return;
                 }
             }
@@ -694,10 +697,7 @@ pub fn decode_ops(bytecode: &[u8]) -> Vec<Op> {
         } else {
             0
         };
-        let payload_bytes = r
-            .read_bytes(payload_len)
-            .unwrap_or_default()
-            .to_vec();
+        let payload_bytes = r.read_bytes(payload_len).unwrap_or_default().to_vec();
         let next_pos = r.position();
         let mut pr = Reader::new(&payload_bytes);
 
@@ -900,7 +900,8 @@ pub fn decode_ops(bytecode: &[u8]) -> Vec<Op> {
         let (_, next_byte_pos, ref op, rel_opt) = raw_insts[i];
         let resolved = match (op, rel_opt) {
             (Op::Jump(_), Some(off)) => {
-                let target_byte = (next_byte_pos as isize).saturating_add(off as isize).max(0) as usize;
+                let target_byte =
+                    (next_byte_pos as isize).saturating_add(off as isize).max(0) as usize;
                 let target_idx = raw_insts
                     .iter()
                     .position(|(sp, _, _, _)| *sp >= target_byte)
@@ -908,7 +909,8 @@ pub fn decode_ops(bytecode: &[u8]) -> Vec<Op> {
                 Op::Jump(target_idx)
             }
             (Op::If(_), Some(off)) => {
-                let target_byte = (next_byte_pos as isize).saturating_add(off as isize).max(0) as usize;
+                let target_byte =
+                    (next_byte_pos as isize).saturating_add(off as isize).max(0) as usize;
                 let target_idx = raw_insts
                     .iter()
                     .position(|(sp, _, _, _)| *sp >= target_byte)
@@ -1061,8 +1063,12 @@ impl Avm1 {
             ("RIGHT", 39),
             ("DOWN", 40),
         ] {
-            self.heap
-                .set_prop(key_id, name, Value::Number(f64::from(code)), self.swf_version);
+            self.heap.set_prop(
+                key_id,
+                name,
+                Value::Number(f64::from(code)),
+                self.swf_version,
+            );
         }
         self.heap.set_prop(
             key_id,
@@ -1074,18 +1080,10 @@ impl Avm1 {
 
         // Stage built-in object
         let stage_id = self.heap.alloc_object(None);
-        self.heap.set_prop(
-            stage_id,
-            "width",
-            Value::Number(320.0),
-            self.swf_version,
-        );
-        self.heap.set_prop(
-            stage_id,
-            "height",
-            Value::Number(240.0),
-            self.swf_version,
-        );
+        self.heap
+            .set_prop(stage_id, "width", Value::Number(320.0), self.swf_version);
+        self.heap
+            .set_prop(stage_id, "height", Value::Number(240.0), self.swf_version);
         self.heap.set_prop(
             stage_id,
             "scaleMode",
@@ -1265,8 +1263,7 @@ impl Avm1 {
                             if let Some(f) = stage.root.resolve_label(&s) {
                                 let _ = stage.goto_frame("_root", f, *play_after);
                             } else if let Ok(n) = s.parse::<u16>() {
-                                let _ =
-                                    stage.goto_frame("_root", n.saturating_sub(1), *play_after);
+                                let _ = stage.goto_frame("_root", n.saturating_sub(1), *play_after);
                             }
                         }
                         _ => {}
@@ -1458,12 +1455,12 @@ impl Avm1 {
                 }
                 Op::StringLength => {
                     let s = self.pop().to_avm_string(self.swf_version, &self.heap);
-                    self.stack
-                        .push(Value::Number(s.chars().count() as f64));
+                    self.stack.push(Value::Number(s.chars().count() as f64));
                 }
                 Op::StringExtract => {
                     let count = self.pop().to_i32(self.swf_version).max(0) as usize;
-                    let index = self.pop().to_i32(self.swf_version).saturating_sub(1).max(0) as usize;
+                    let index =
+                        self.pop().to_i32(self.swf_version).saturating_sub(1).max(0) as usize;
                     let s = self.pop().to_avm_string(self.swf_version, &self.heap);
                     let sub: String = s.chars().skip(index).take(count).collect();
                     self.stack.push(Value::String(sub));
@@ -1569,9 +1566,9 @@ impl Avm1 {
                     let _target = self.pop();
                     let val = match idx {
                         4 => Value::Number(f64::from(stage.root.current_frame) + 1.0), // _currentframe
-                        5 => Value::Number(f64::from(stage.root.frame_count)),         // _totalframes
-                        8 => Value::Number(f64::from(stage.width_px)),                 // _width
-                        9 => Value::Number(f64::from(stage.height_px)),                // _height
+                        5 => Value::Number(f64::from(stage.root.frame_count)), // _totalframes
+                        8 => Value::Number(f64::from(stage.width_px)),         // _width
+                        9 => Value::Number(f64::from(stage.height_px)),        // _height
                         _ => Value::Number(0.0),
                     };
                     self.stack.push(val);
@@ -1615,7 +1612,8 @@ impl Avm1 {
                     for _ in 0..nargs.min(256) {
                         args.push(self.pop());
                     }
-                    let res = self.call_named_function(&fname, this_obj, locals, args, stage, budget, depth);
+                    let res = self
+                        .call_named_function(&fname, this_obj, locals, args, stage, budget, depth);
                     self.stack.push(res);
                 }
                 Op::CallMethod => {
@@ -1665,10 +1663,7 @@ impl Avm1 {
     ) -> Value {
         let norm = normalize_key(name, self.swf_version);
         if norm == "this" {
-            return this_obj.map_or_else(
-                || Value::MovieClip("_root".to_owned()),
-                Value::Object,
-            );
+            return this_obj.map_or_else(|| Value::MovieClip("_root".to_owned()), Value::Object);
         }
         if norm == "_root" || norm == "_level0" {
             return Value::MovieClip("_root".to_owned());
@@ -1737,20 +1732,20 @@ impl Avm1 {
     ) -> Value {
         let norm = normalize_key(fname, self.swf_version);
         match norm.as_str() {
-            "number" => args
-                .first()
-                .map_or(Value::Number(0.0), |v| Value::Number(v.to_number(self.swf_version))),
+            "number" => args.first().map_or(Value::Number(0.0), |v| {
+                Value::Number(v.to_number(self.swf_version))
+            }),
             "string" => args.first().map_or_else(
                 || Value::String(String::new()),
                 |v| Value::String(v.to_avm_string(self.swf_version, &self.heap)),
             ),
-            "boolean" => args
-                .first()
-                .map_or(Value::Bool(false), |v| Value::Bool(v.to_bool(self.swf_version))),
+            "boolean" => args.first().map_or(Value::Bool(false), |v| {
+                Value::Bool(v.to_bool(self.swf_version))
+            }),
             "parseint" => {
-                let s = args
-                    .first()
-                    .map_or_else(String::new, |v| v.to_avm_string(self.swf_version, &self.heap));
+                let s = args.first().map_or_else(String::new, |v| {
+                    v.to_avm_string(self.swf_version, &self.heap)
+                });
                 let radix = args
                     .get(1)
                     .map_or(10, |r| r.to_i32(self.swf_version).clamp(2, 36) as u32);
@@ -1766,9 +1761,9 @@ impl Avm1 {
                 Value::Number(parsed)
             }
             "parsefloat" => {
-                let s = args
-                    .first()
-                    .map_or_else(String::new, |v| v.to_avm_string(self.swf_version, &self.heap));
+                let s = args.first().map_or_else(String::new, |v| {
+                    v.to_avm_string(self.swf_version, &self.heap)
+                });
                 Value::Number(s.trim().parse::<f64>().unwrap_or(f64::NAN))
             }
             "isnan" => {
@@ -1856,14 +1851,16 @@ impl Avm1 {
                     let code = if idx < 0 {
                         f64::NAN
                     } else {
-                        s.chars().nth(idx as usize).map_or(f64::NAN, |c| f64::from(c as u32))
+                        s.chars()
+                            .nth(idx as usize)
+                            .map_or(f64::NAN, |c| f64::from(c as u32))
                     };
                     Value::Number(code)
                 }
                 "indexof" => {
-                    let needle = args
-                        .first()
-                        .map_or_else(String::new, |v| v.to_avm_string(self.swf_version, &self.heap));
+                    let needle = args.first().map_or_else(String::new, |v| {
+                        v.to_avm_string(self.swf_version, &self.heap)
+                    });
                     let pos = s.find(&needle).map_or(-1.0, |i| i as f64);
                     Value::Number(pos)
                 }
@@ -1902,9 +1899,9 @@ impl Avm1 {
                     Value::String(out)
                 }
                 "split" => {
-                    let delim = args
-                        .first()
-                        .map_or_else(String::new, |v| v.to_avm_string(self.swf_version, &self.heap));
+                    let delim = args.first().map_or_else(String::new, |v| {
+                        v.to_avm_string(self.swf_version, &self.heap)
+                    });
                     let parts: Vec<Value> = if delim.is_empty() {
                         s.chars().map(|c| Value::String(c.to_string())).collect()
                     } else {
@@ -2109,18 +2106,11 @@ impl Avm1 {
                 );
                 Value::Object(sid)
             }
-            "string" => Value::String(
-                args.first()
-                    .map_or_else(String::new, |v| v.to_avm_string(self.swf_version, &self.heap)),
-            ),
-            "number" => Value::Number(
-                args.first()
-                    .map_or(0.0, |v| v.to_number(self.swf_version)),
-            ),
-            "boolean" => Value::Bool(
-                args.first()
-                    .is_some_and(|v| v.to_bool(self.swf_version)),
-            ),
+            "string" => Value::String(args.first().map_or_else(String::new, |v| {
+                v.to_avm_string(self.swf_version, &self.heap)
+            })),
+            "number" => Value::Number(args.first().map_or(0.0, |v| v.to_number(self.swf_version))),
+            "boolean" => Value::Bool(args.first().is_some_and(|v| v.to_bool(self.swf_version))),
             _ => {
                 if let Value::Object(ctor_id) = self.get_global(cname) {
                     let proto = match self.heap.get_prop(ctor_id, "prototype", self.swf_version) {
@@ -2128,8 +2118,7 @@ impl Avm1 {
                         _ => None,
                     };
                     let inst_id = self.heap.alloc_object(proto);
-                    let _ =
-                        self.invoke_user_function(ctor_id, Some(inst_id), args, stage, budget);
+                    let _ = self.invoke_user_function(ctor_id, Some(inst_id), args, stage, budget);
                     Value::Object(inst_id)
                 } else {
                     Value::Object(self.heap.alloc_object(None))

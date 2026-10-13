@@ -869,7 +869,9 @@ impl Movie {
             _ => {
                 return Err(ParseError {
                     offset: 0,
-                    kind: ParseErrorKind::InvalidHeader("unknown SWF signature (expected FWS/CWS/ZWS)"),
+                    kind: ParseErrorKind::InvalidHeader(
+                        "unknown SWF signature (expected FWS/CWS/ZWS)",
+                    ),
                 });
             }
         };
@@ -906,7 +908,9 @@ impl Movie {
                 )
                 .map_err(|_| ParseError {
                     offset: 8,
-                    kind: ParseErrorKind::DecompressionError("zlib decompression failed or exceeded limit"),
+                    kind: ParseErrorKind::DecompressionError(
+                        "zlib decompression failed or exceeded limit",
+                    ),
                 })?;
                 decompressed
             }
@@ -935,7 +939,9 @@ impl Movie {
                 if out.len() > limits.max_decompressed_size {
                     return Err(ParseError {
                         offset: 12,
-                        kind: ParseErrorKind::LimitExceeded("LZMA output exceeded max_decompressed_size"),
+                        kind: ParseErrorKind::LimitExceeded(
+                            "LZMA output exceeded max_decompressed_size",
+                        ),
                     });
                 }
                 out
@@ -1766,10 +1772,7 @@ fn decode_morph_shape(
     })
 }
 
-fn decode_place_object2(
-    r: &mut Reader<'_>,
-    is_v3: bool,
-) -> Result<PlaceObject2Tag, ParseError> {
+fn decode_place_object2(r: &mut Reader<'_>, is_v3: bool) -> Result<PlaceObject2Tag, ParseError> {
     let has_clip_actions = r.ubits(1)? != 0;
     let has_clip_depth = r.ubits(1)? != 0;
     let has_name = r.ubits(1)? != 0;

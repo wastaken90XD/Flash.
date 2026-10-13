@@ -12,7 +12,14 @@ use swfr_swf::{
 };
 use swfr_testkit::{verify_or_create_golden, SwfBuilder};
 
-fn rect_records(x0: i32, y0: i32, w: i32, h: i32, fill1: u32, line: Option<u32>) -> Vec<ShapeRecord> {
+fn rect_records(
+    x0: i32,
+    y0: i32,
+    w: i32,
+    h: i32,
+    fill1: u32,
+    line: Option<u32>,
+) -> Vec<ShapeRecord> {
     vec![
         ShapeRecord::StyleChange {
             move_to: Some((x0, y0)),

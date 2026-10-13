@@ -362,7 +362,9 @@ impl Player {
             let stage = Stage::from_movie(&movie);
             let renderer = Renderer::new(sw, sh, opts.scale.factor().clamp(1, 2));
             let mut vm = Avm1::new(movie.header.version);
-            vm.max_ops_per_run = u64::from(opts.script_timeout_secs).saturating_mul(250_000).max(10_000);
+            vm.max_ops_per_run = u64::from(opts.script_timeout_secs)
+                .saturating_mul(250_000)
+                .max(10_000);
             let mut audio = AudioMixer::new();
             for tag in &movie.tags {
                 if let Tag::DefineSound(snd) = tag {

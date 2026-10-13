@@ -168,10 +168,8 @@ impl BitWriter {
     /// Writes a `CXFORM` or `CXFORMWITHALPHA` structure.
     pub fn write_cxform(&mut self, cx: ColorTransform, with_alpha: bool) {
         self.align();
-        let has_add = cx.r_add != 0
-            || cx.g_add != 0
-            || cx.b_add != 0
-            || (with_alpha && cx.a_add != 0);
+        let has_add =
+            cx.r_add != 0 || cx.g_add != 0 || cx.b_add != 0 || (with_alpha && cx.a_add != 0);
         let has_mult = cx.r_mult != 256
             || cx.g_mult != 256
             || cx.b_mult != 256
@@ -936,7 +934,10 @@ fn encode_morph_shape(w: &mut BitWriter, morph: &MorphShapeDef) {
     }
 
     let mut body = BitWriter::new();
-    let fill_count = morph.start_fill_styles.len().min(morph.end_fill_styles.len());
+    let fill_count = morph
+        .start_fill_styles
+        .len()
+        .min(morph.end_fill_styles.len());
     body.write_u8(u8::try_from(fill_count).unwrap_or(0));
     for i in 0..fill_count {
         if let (Some(FillStyle::Solid(sc)), Some(FillStyle::Solid(ec))) =
@@ -947,7 +948,10 @@ fn encode_morph_shape(w: &mut BitWriter, morph: &MorphShapeDef) {
             write_rgba(&mut body, *ec, true);
         }
     }
-    let line_count = morph.start_line_styles.len().min(morph.end_line_styles.len());
+    let line_count = morph
+        .start_line_styles
+        .len()
+        .min(morph.end_line_styles.len());
     body.write_u8(u8::try_from(line_count).unwrap_or(0));
     for i in 0..line_count {
         if let (Some(sls), Some(els)) =
@@ -1273,8 +1277,10 @@ impl ActionBuilder {
         self.bytes.push(0x96);
         self.bytes.extend_from_slice(&9_u16.to_le_bytes());
         self.bytes.push(0x06); // type 6 = double (high 4 bytes LE followed by low 4 bytes LE)
-        self.bytes.extend_from_slice(le.get(4..8).unwrap_or(&[0; 4]));
-        self.bytes.extend_from_slice(le.get(0..4).unwrap_or(&[0; 4]));
+        self.bytes
+            .extend_from_slice(le.get(4..8).unwrap_or(&[0; 4]));
+        self.bytes
+            .extend_from_slice(le.get(0..4).unwrap_or(&[0; 4]));
         self
     }
 
@@ -1701,7 +1707,9 @@ pub fn encode_frame_png(width: u32, height: u32, xrgb: &[u32]) -> Result<Vec<u8>
 pub fn decode_frame_png(png_bytes: &[u8]) -> Result<(u32, u32, Vec<u32>), String> {
     let decoder = png::Decoder::new(Cursor::new(png_bytes));
     let mut reader = decoder.read_info().map_err(|e| e.to_string())?;
-    let buf_size = reader.output_buffer_size().ok_or("missing PNG buffer size")?;
+    let buf_size = reader
+        .output_buffer_size()
+        .ok_or("missing PNG buffer size")?;
     let mut buf = vec![0_u8; buf_size];
     let info = reader.next_frame(&mut buf).map_err(|e| e.to_string())?;
     let bytes = buf.get(..info.buffer_size()).unwrap_or(&[]);
@@ -1710,9 +1718,8 @@ pub fn decode_frame_png(png_bytes: &[u8]) -> Result<(u32, u32, Vec<u32>), String
         png::ColorType::Rgba => 4_usize,
         _ => return Err("unsupported PNG color type".to_owned()),
     };
-    let mut xrgb = Vec::with_capacity(
-        usize::try_from(info.width.saturating_mul(info.height)).unwrap_or(0),
-    );
+    let mut xrgb =
+        Vec::with_capacity(usize::try_from(info.width.saturating_mul(info.height)).unwrap_or(0));
     let mut idx = 0_usize;
     while idx.saturating_add(step) <= bytes.len() {
         let r = u32::from(bytes.get(idx).copied().unwrap_or(0));

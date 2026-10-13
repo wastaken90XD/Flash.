@@ -154,8 +154,7 @@ impl Renderer {
         stage.dirty_rects.clear();
 
         let bg = stage.background_color;
-        self.pixmap
-            .fill(Color::from_rgba8(bg.r, bg.g, bg.b, 255));
+        self.pixmap.fill(Color::from_rgba8(bg.r, bg.g, bg.b, 255));
 
         let root_xform = Transform::from_scale(self.scale as f32 / 20.0, self.scale as f32 / 20.0);
         render_display_list(
@@ -275,10 +274,8 @@ fn render_display_list(
 
         if let Some(clip_end) = obj.clip_depth {
             if clip_end > depth {
-                let mut mask_pm =
-                    Pixmap::new(pixmap.width(), pixmap.height()).unwrap_or_else(|| {
-                        Pixmap::new(1, 1).expect("1x1 mask pixmap")
-                    });
+                let mut mask_pm = Pixmap::new(pixmap.width(), pixmap.height())
+                    .unwrap_or_else(|| Pixmap::new(1, 1).expect("1x1 mask pixmap"));
                 render_object(
                     &mut mask_pm,
                     cache,
@@ -294,10 +291,7 @@ fn render_display_list(
             }
         }
 
-        let mask_ref = active_clip
-            .as_ref()
-            .map(|(_, m)| m)
-            .or(inherited_mask);
+        let mask_ref = active_clip.as_ref().map(|(_, m)| m).or(inherited_mask);
 
         render_object(pixmap, cache, obj, dict, obj_xform, obj_cx, mask_ref);
     }
@@ -350,15 +344,7 @@ fn render_object(
         }
         Character::Sprite { .. } => {
             if let Some(ref child_tl) = obj.sprite_timeline {
-                render_display_list(
-                    pixmap,
-                    cache,
-                    &child_tl.display_list,
-                    dict,
-                    xform,
-                    cx,
-                    mask,
-                );
+                render_display_list(pixmap, cache, &child_tl.display_list, dict, xform, cx, mask);
             }
         }
         Character::Font(_) | Character::Sound(_) => {}
@@ -635,12 +621,7 @@ fn render_edit_text(
                                 edit.color,
                                 cx,
                                 xform.pre_concat(Transform::from_row(
-                                    scale,
-                                    0.0,
-                                    0.0,
-                                    scale,
-                                    cur_x,
-                                    baseline_y,
+                                    scale, 0.0, 0.0, scale, cur_x, baseline_y,
                                 )),
                                 mask,
                             );
@@ -747,15 +728,7 @@ fn render_button(
         };
         let child_xform = parent_xform.pre_concat(matrix_to_skia(rec.matrix));
         let child_cx = combine_cxform(parent_cx, rec.color_transform);
-        render_object(
-            pixmap,
-            cache,
-            &dummy_obj,
-            dict,
-            child_xform,
-            child_cx,
-            mask,
-        );
+        render_object(pixmap, cache, &dummy_obj, dict, child_xform, child_cx, mask);
     }
 }
 
@@ -801,9 +774,8 @@ fn apply_cxform(c: Rgba, cx: ColorTransform) -> Rgba {
 
 #[allow(clippy::arithmetic_side_effects)]
 const fn combine_cxform(parent: ColorTransform, child: ColorTransform) -> ColorTransform {
-    let mult = |pm: i16, cm: i16| -> i16 {
-        ((pm as i32 * cm as i32) >> 8).clamp(-32768, 32767) as i16
-    };
+    let mult =
+        |pm: i16, cm: i16| -> i16 { ((pm as i32 * cm as i32) >> 8).clamp(-32768, 32767) as i16 };
     let add = |pm: i16, pa: i16, ca: i16| -> i16 {
         (((ca as i32 * pm as i32) >> 8) + pa as i32).clamp(-32768, 32767) as i16
     };

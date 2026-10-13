@@ -145,9 +145,17 @@ fn avm1_es3_conformance_160_generated_movies() {
         let mut ab = ActionBuilder::new();
         ab.push_str(&word).string_len().trace();
         // word.toLowerCase()
-        ab.push_i32(0).push_str(&word).push_str("toLowerCase").call_method().trace();
+        ab.push_i32(0)
+            .push_str(&word)
+            .push_str("toLowerCase")
+            .call_method()
+            .trace();
         // word.toUpperCase()
-        ab.push_i32(0).push_str(&word).push_str("toUpperCase").call_method().trace();
+        ab.push_i32(0)
+            .push_str(&word)
+            .push_str("toUpperCase")
+            .call_method()
+            .trace();
         // word.substr(5, 8) (args pushed in reverse order for ActionCallMethod)
         ab.push_i32(8)
             .push_i32(5)
@@ -187,9 +195,13 @@ fn avm1_es3_conformance_160_generated_movies() {
             .push_i32(i)
             .push_i32(3)
             .init_array();
-        ab.push_str("arr"). op(0x4D).set_var(); // StackSwap + SetVariable
-        // arr.length
-        ab.push_str("arr").get_var().push_str("length").get_member().trace();
+        ab.push_str("arr").op(0x4D).set_var(); // StackSwap + SetVariable
+                                               // arr.length
+        ab.push_str("arr")
+            .get_var()
+            .push_str("length")
+            .get_member()
+            .trace();
         // arr.join("-")
         ab.push_str("-")
             .push_i32(1)
@@ -322,7 +334,7 @@ fn avm1_timers_key_and_gc_work_deterministically() {
         .push_str("setTimeout")
         .call_function()
         .op(0x17); // Pop
-    // Key.isDown(37)
+                   // Key.isDown(37)
     ab.push_i32(37)
         .push_i32(1)
         .push_str("Key")
