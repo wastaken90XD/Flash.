@@ -82,6 +82,16 @@ jobs:
           fi
           rustup target add "${{ matrix.target }}"
           cargo metadata --locked >/dev/null 2>&1 || cargo generate-lockfile
+          if cargo tree -p swfr-libretro --target "${{ matrix.target }}" -e features | grep -q "m0-stub"; then
+            echo "::error::m0-stub feature is enabled in shipped release build for ${{ matrix.target }}"
+            exit 1
+          fi
+          for req in swfr-swf swfr-scene swfr-render swfr-avm1 swfr-audio; do
+            if ! cargo tree -p swfr-libretro --target "${{ matrix.target }}" | grep -q "${req}"; then
+              echo "::error::swfr-libretro missing ${req} in release build for ${{ matrix.target }}"
+              exit 1
+            fi
+          done
           UPPER_TARGET=$(echo "${{ matrix.target }}" | tr 'a-z-' 'A-Z_')
 
           if [ "${{ matrix.kind }}" = "android" ]; then
@@ -125,6 +135,10 @@ jobs:
           git checkout --force "${GITHUB_SHA}"
           rustup target add "${{ matrix.target }}"
           cargo metadata --locked >/dev/null 2>&1 || cargo generate-lockfile
+          if cargo tree -p swfr-libretro --target "${{ matrix.target }}" -e features | grep -q "m0-stub"; then
+            echo "::error::m0-stub feature is enabled in shipped release build for ${{ matrix.target }}"
+            exit 1
+          fi
           cargo build --release -p swfr-libretro --target "${{ matrix.target }}"
           mkdir -p dist
           cp "target/${{ matrix.target }}/release/swfr_libretro.dll" dist/swfr_libretro.dll
@@ -158,6 +172,10 @@ jobs:
         run: |
           rustup target add "${{ matrix.target }}"
           cargo metadata --locked >/dev/null 2>&1 || cargo generate-lockfile
+          if cargo tree -p swfr-libretro --target "${{ matrix.target }}" -e features | grep -q "m0-stub"; then
+            echo "::error::m0-stub feature is enabled in shipped release build for ${{ matrix.target }}"
+            exit 1
+          fi
           mkdir -p dist
           if [ "${{ matrix.kind }}" = "dylib" ]; then
             cargo build --release -p swfr-libretro --target "${{ matrix.target }}"

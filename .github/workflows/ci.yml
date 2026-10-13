@@ -114,6 +114,23 @@ jobs:
           print("Verified `unsafe` is strictly confined to crates/swfr-libretro/src/ffi.rs.")
           PY
 
+      - name: Check real dependency chain (cargo tree -p swfr-libretro) and m0-stub off by default
+        run: |
+          TREE_OUT=$(cargo tree -p swfr-libretro)
+          echo "${TREE_OUT}"
+          for req in swfr-swf swfr-scene swfr-render swfr-avm1 swfr-audio; do
+            if ! echo "${TREE_OUT}" | grep -q "${req}"; then
+              echo "::error::cargo tree -p swfr-libretro is missing required crate '${req}'"
+              exit 1
+            fi
+          done
+          TREE_FEATS=$(cargo tree -p swfr-libretro -e features)
+          if echo "${TREE_FEATS}" | grep -q "m0-stub"; then
+            echo "::error::m0-stub feature is enabled by default in swfr-libretro"
+            exit 1
+          fi
+          echo "Verified swfr-libretro depends on swfr-swf, swfr-scene, swfr-render, swfr-avm1, swfr-audio and m0-stub is disabled."
+
   build-test:
     name: build-test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -209,6 +226,22 @@ jobs:
           name: core-size-metric
           path: core-size.txt
 
+  corpus-real:
+    name: corpus-real
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Fetch real corpus SWF files and run 120 frames through exported ABI
+        env:
+          SWFR_REQUIRE_REAL_CORPUS: "1"
+        run: |
+          set -euo pipefail
+          cargo metadata --locked >/dev/null 2>&1 || cargo generate-lockfile
+          python3 scripts/fetch_real_corpus.py
+          cargo test -p swfr-libretro --test e2e e2e_real_corpus_manifest_runs_120_frames_without_m0_stub -- --exact --nocapture
+
   bench:
     name: bench
     runs-on: ubuntu-latest
@@ -216,10 +249,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
-      - name: Run swfr-harness benchmark suite (30% regression gate)
+      - name: Run swfr-harness benchmark suite (10-frame movie + largest real file, 30% gate)
         run: |
           set -euo pipefail
           cargo metadata --locked >/dev/null 2>&1 || cargo generate-lockfile
+          python3 scripts/fetch_real_corpus.py
           cargo run --release -p swfr-harness -- bench | tee bench-report.md
 
       - name: Upload benchmark report
@@ -266,7 +300,7 @@ jobs:
   ci-report:
     name: ci-report
     if: always()
-    needs: [lints, build-test, abi, size-check, bench, cross-build]
+    needs: [lints, build-test, abi, corpus-real, size-check, bench, cross-build]
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
@@ -281,11 +315,13 @@ jobs:
           RES_LINTS: ${{ needs.lints.result }}
           RES_BUILD: ${{ needs.build-test.result }}
           RES_ABI: ${{ needs.abi.result }}
+          RES_CORPUS: ${{ needs.corpus-real.result }}
           RES_SIZE: ${{ needs.size-check.result }}
           RES_BENCH: ${{ needs.bench.result }}
           RES_CROSS: ${{ needs.cross-build.result }}
         run: |
           cargo metadata --locked >/dev/null 2>&1 || cargo generate-lockfile
+          python3 scripts/fetch_real_corpus.py || true
           BENCH_TABLE=$(cargo run --release -p swfr-harness -- bench 2>/dev/null || echo "| Benchmark | N/A | N/A |")
           {
             printf '%s\n' "<!-- swfr-ci-report -->"
@@ -293,11 +329,12 @@ jobs:
             printf '\n'
             printf '%s\n' "| Job | Status |"
             printf '%s\n' "| :--- | :--- |"
-            printf '%s\n' "| \`lints\` (\`fmt\`, \`clippy\`, \`doc\`, \`deny\`, \`unsafe\`) | **${RES_LINTS}** |"
+            printf '%s\n' "| \`lints\` (\`fmt\`, \`clippy\`, \`doc\`, \`deny\`, \`unsafe\`, \`cargo tree\`, \`!m0-stub\`) | **${RES_LINTS}** |"
             printf '%s\n' "| \`build-test\` (\`ubuntu\`, \`macos\`, \`windows\`) | **${RES_BUILD}** |"
-            printf '%s\n' "| \`abi\` (\`ubuntu\`, \`macos\`, \`windows\` + \`fault-inject\`) | **${RES_ABI}** |"
+            printf '%s\n' "| \`abi\` (\`ubuntu\`, \`macos\`, \`windows\` + \`e2e\` + \`fault-inject\`) | **${RES_ABI}** |"
+            printf '%s\n' "| \`corpus-real\` (\`120 frames\` through exported ABI, no M0 stub hash) | **${RES_CORPUS}** |"
             printf '%s\n' "| \`size-check\` (\`< 6 MiB\` + \`25 retro_*\` symbols) | **${RES_SIZE}** |"
-            printf '%s\n' "| \`bench\` (\`< 30%\` regression gate) | **${RES_BENCH}** |"
+            printf '%s\n' "| \`bench\` (\`10-frame movie\` + \`largest real SWF\`, \`< 30%\` gate) | **${RES_BENCH}** |"
             printf '%s\n' "| \`cross-build\` (\`25 retro_*\` symbols verified) | **${RES_CROSS}** |"
             printf '\n'
             printf '%s\n' "### Per-Frame Performance Benchmark (\`swfr-harness bench\`)"

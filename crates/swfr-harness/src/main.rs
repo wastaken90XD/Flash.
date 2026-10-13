@@ -1,9 +1,11 @@
-//! CLI entrypoint for `swfr-harness` (TSD 2.6, 2.12 M0–M6, 3.6 M6).
+//! CLI entrypoint for `swfr-harness` (TSD 2.6, 2.12 M0–M6, 3.6 M6, 3.14.6).
 
 use std::env;
 use std::fs;
 use std::path::Path;
-use swfr_harness::{format_movie_info, run_benchmark_suite, write_synthetic_test_swfs};
+use swfr_harness::{
+    build_benchmark_swf, format_movie_info, run_benchmark_suite, write_synthetic_test_swfs,
+};
 
 fn main() {
     let mut args = env::args().skip(1);
@@ -22,15 +24,15 @@ fn main() {
             let bytes = args
                 .next()
                 .and_then(|p| fs::read(p).ok())
-                .unwrap_or_else(|| b"SWFR_STUB".to_vec());
+                .unwrap_or_else(build_benchmark_swf);
             print!("{}", format_movie_info(&bytes));
         }
         Some(path) => {
-            let bytes = fs::read(path).unwrap_or_else(|_| b"SWFR_STUB".to_vec());
+            let bytes = fs::read(path).unwrap_or_else(|_| build_benchmark_swf());
             print!("{}", format_movie_info(&bytes));
         }
         None => {
-            print!("{}", format_movie_info(b"SWFR_STUB"));
+            print!("{}", format_movie_info(&build_benchmark_swf()));
         }
     }
 }

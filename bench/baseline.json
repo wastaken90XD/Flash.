@@ -1,4 +1,21 @@
 {
-  "version": 1,
-  "benchmarks": {}
+  "runner": "ubuntu-latest",
+  "profile": "release",
+  "workloads": {
+    "moving_square_10frame_200x100": {
+      "frames": 120,
+      "baseline_frame_ms": 4.0,
+      "max_regression_percent": 30,
+      "gate_frame_ms": 5.2
+    },
+    "largest_real_corpus_swf": {
+      "name": "ruffle-sound.swf",
+      "size_bytes": 6336,
+      "frames": 120,
+      "baseline_frame_ms": 4.0,
+      "max_regression_percent": 30,
+      "gate_frame_ms": 5.2
+    }
+  },
+  "max_core_size_bytes": 6291456
 }

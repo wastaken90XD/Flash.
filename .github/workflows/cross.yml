@@ -57,11 +57,15 @@ jobs:
           fi
           rustup target add "${{ matrix.target }}"
 
-      - name: Build release core, verify 25 retro_* symbols, and run QEMU ABI test if configured
+      - name: Build release core, verify m0-stub off & 25 retro_* symbols, and run QEMU ABI test if configured
         env:
           RUSTFLAGS: ${{ matrix.rustflags }}
         run: |
           cargo metadata --locked >/dev/null 2>&1 || cargo generate-lockfile
+          if cargo tree -p swfr-libretro --target "${{ matrix.target }}" -e features | grep -q "m0-stub"; then
+            echo "::error::m0-stub feature is enabled in shipped build for ${{ matrix.target }}"
+            exit 1
+          fi
           UPPER_TARGET=$(echo "${{ matrix.target }}" | tr 'a-z-' 'A-Z_')
           if [ -n "${{ matrix.linker }}" ]; then
             export "CARGO_TARGET_${UPPER_TARGET}_LINKER=${{ matrix.linker }}"
@@ -78,11 +82,12 @@ jobs:
             exit 1
           fi
 
-          # Run ABI test under QEMU user-mode for armv7-unknown-linux-gnueabihf (TSD 3.6 M6)
+          # Run ABI and E2E tests under QEMU user-mode for armv7-unknown-linux-gnueabihf (TSD 3.6 M6, 3.14)
           if [ -n "${{ matrix.qemu }}" ]; then
             export "CARGO_TARGET_${UPPER_TARGET}_RUNNER=${{ matrix.qemu }}"
             cargo test -p swfr-libretro --target "${{ matrix.target }}" --test header_check
             cargo test -p swfr-libretro --target "${{ matrix.target }}" --test abi -- --test-threads=1
+            cargo test -p swfr-libretro --target "${{ matrix.target }}" --test e2e -- --test-threads=1
           fi
 
           mkdir -p dist
@@ -125,6 +130,10 @@ jobs:
         run: |
           rustup target add "${{ matrix.target }}"
           cargo metadata --locked >/dev/null 2>&1 || cargo generate-lockfile
+          if cargo tree -p swfr-libretro --target "${{ matrix.target }}" -e features | grep -q "m0-stub"; then
+            echo "::error::m0-stub feature is enabled in shipped build for ${{ matrix.target }}"
+            exit 1
+          fi
           NDK_BIN="${ANDROID_NDK_LATEST_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
           UPPER_TARGET=$(echo "${{ matrix.target }}" | tr 'a-z-' 'A-Z_')
           export "CARGO_TARGET_${UPPER_TARGET}_LINKER=${NDK_BIN}/${{ matrix.clang_prefix }}"
@@ -172,6 +181,10 @@ jobs:
           sudo apt-get install -y ${{ matrix.pkg }}
           rustup target add "${{ matrix.target }}"
           cargo metadata --locked >/dev/null 2>&1 || cargo generate-lockfile
+          if cargo tree -p swfr-libretro --target "${{ matrix.target }}" -e features | grep -q "m0-stub"; then
+            echo "::error::m0-stub feature is enabled in shipped build for ${{ matrix.target }}"
+            exit 1
+          fi
           cargo build --release -p swfr-libretro --target "${{ matrix.target }}"
 
           DLL_PATH="target/${{ matrix.target }}/release/swfr_libretro.dll"
@@ -211,6 +224,10 @@ jobs:
           git checkout --force "${GITHUB_SHA}"
           rustup target add "${{ matrix.target }}"
           cargo metadata --locked >/dev/null 2>&1 || cargo generate-lockfile
+          if cargo tree -p swfr-libretro --target "${{ matrix.target }}" -e features | grep -q "m0-stub"; then
+            echo "::error::m0-stub feature is enabled in shipped build for ${{ matrix.target }}"
+            exit 1
+          fi
           cargo build --release -p swfr-libretro --target "${{ matrix.target }}"
 
           DLL_PATH="target/${{ matrix.target }}/release/swfr_libretro.dll"
@@ -253,6 +270,10 @@ jobs:
         run: |
           rustup target add "${{ matrix.target }}"
           cargo metadata --locked >/dev/null 2>&1 || cargo generate-lockfile
+          if cargo tree -p swfr-libretro --target "${{ matrix.target }}" -e features | grep -q "m0-stub"; then
+            echo "::error::m0-stub feature is enabled in shipped build for ${{ matrix.target }}"
+            exit 1
+          fi
           mkdir -p dist
           if [ "${{ matrix.kind }}" = "dylib" ]; then
             cargo build --release -p swfr-libretro --target "${{ matrix.target }}"

@@ -140,8 +140,15 @@ fn full_libretro_abi_lifecycle_and_fault_containment() {
     assert!(!retro_load_game(core::ptr::null()));
     assert!(!retro_load_game_special(0, core::ptr::null(), 0));
 
-    // 4. Load a 12 fps minimal SWF header and run 600 frames.
-    let swf_12fps = b"FWS\x08\x0d\x00\x00\x00\x00\x00\x0c\x01\x00";
+    // 4. Load a valid 12 fps 320x240 SWF movie and run 600 frames.
+    let mut builder = swfr_testkit::SwfBuilder::new(8, 320, 240, 12.0, 1);
+    builder.push_tag(&swfr_swf::Tag::SetBackgroundColor {
+        r: 0xFF,
+        g: 0xFF,
+        b: 0xFF,
+    });
+    builder.push_tag(&swfr_swf::Tag::ShowFrame);
+    let swf_12fps = builder.build();
     let game_info = retro_game_info {
         path: c"test_12fps.swf".as_ptr(),
         data: swf_12fps.as_ptr().cast::<c_void>(),

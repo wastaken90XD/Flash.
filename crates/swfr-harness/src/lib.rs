@@ -1,5 +1,5 @@
 //! Development CLI, benchmark runner, and headless verification harness for `swfr`
-//! (TSD 2.6, 2.12 M0–M6, 3.6 M6).
+//! (TSD 2.6, 2.12 M0–M6, 3.6 M6, 3.14.6).
 #![allow(
     clippy::arithmetic_side_effects,
     clippy::collapsible_if,
@@ -8,7 +8,8 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::Instant;
 use swfr_player::{AvInfo, Input, Options, Player, PlayerError};
 use swfr_reader::{ColorTransform, Matrix, Rect};
@@ -100,8 +101,82 @@ pub fn format_movie_info(swf_bytes: &[u8]) -> String {
     out
 }
 
+/// Builds the 10-frame moving-square movie where a 20x20 square moves 10 pixels per frame (TSD 3.14.4, 3.14.6).
+#[must_use]
+pub fn build_moving_square_10frame_swf() -> Vec<u8> {
+    let mut b = SwfBuilder::new(8, 200, 100, 30.0, 10);
+    b.push_tag(&Tag::SetBackgroundColor {
+        r: 0x00,
+        g: 0x00,
+        b: 0x00,
+    });
+    b.push_tag(&Tag::DefineShape(ShapeDef {
+        id: 1,
+        version: 1,
+        bounds: Rect {
+            x_min: 0,
+            x_max: 400,
+            y_min: 0,
+            y_max: 400,
+        },
+        fill_styles: vec![FillStyle::Solid(Rgba::rgb(0x00, 0xFF, 0x00))],
+        line_styles: Vec::new(),
+        records: vec![
+            ShapeRecord::StyleChange {
+                move_to: Some((0, 0)),
+                fill_style_0: None,
+                fill_style_1: Some(1),
+                line_style: None,
+                new_fill_styles: None,
+                new_line_styles: None,
+            },
+            ShapeRecord::StraightEdge {
+                dx_twips: 400,
+                dy_twips: 0,
+            },
+            ShapeRecord::StraightEdge {
+                dx_twips: 0,
+                dy_twips: 400,
+            },
+            ShapeRecord::StraightEdge {
+                dx_twips: -400,
+                dy_twips: 0,
+            },
+            ShapeRecord::StraightEdge {
+                dx_twips: 0,
+                dy_twips: -400,
+            },
+        ],
+    }));
+
+    for frame_idx in 0..10_i32 {
+        let tx_twips = (10 + frame_idx * 10) * 20;
+        let ty_twips = 40 * 20;
+        b.push_tag(&Tag::PlaceObject2(PlaceObject2Tag {
+            is_move: frame_idx > 0,
+            depth: 1,
+            character_id: if frame_idx == 0 { Some(1) } else { None },
+            matrix: Some(Matrix {
+                scale_x_fp16: 65536,
+                scale_y_fp16: 65536,
+                rotate_skew0_fp16: 0,
+                rotate_skew1_fp16: 0,
+                translate_x_twips: tx_twips,
+                translate_y_twips: ty_twips,
+            }),
+            color_transform: None,
+            ratio: None,
+            name: None,
+            clip_depth: None,
+            clip_actions_raw: None,
+        }));
+        b.push_tag(&Tag::ShowFrame);
+    }
+    b.build()
+}
+
 /// Builds a rich multi-subsystem synthetic SWF (shapes, gradients, dynamic text, AVM1 script, and PCM audio)
-/// used for benchmarking and human-test smoke artifacts.
+/// used for human-test smoke artifacts V2–V7.
 #[must_use]
 pub fn build_benchmark_swf() -> Vec<u8> {
     let mut b = SwfBuilder::new(8, 320, 240, 60.0, 2);
@@ -189,7 +264,6 @@ pub fn build_benchmark_swf() -> Vec<u8> {
         html: false,
         use_outlines: false,
     }));
-    // DefineButton2 interactive button
     b.push_tag(&Tag::DefineButton(ButtonDef {
         id: 3,
         version: 2,
@@ -209,7 +283,6 @@ pub fn build_benchmark_swf() -> Vec<u8> {
             actions: vec![0x00],
         }],
     }));
-    // DefineSound 440Hz short chime
     let mut pcm = Vec::with_capacity(1470 * 2);
     for i in 0..1470_i32 {
         let s = (((i * 600) % 16000) - 8000) as i16;
@@ -267,43 +340,134 @@ pub fn build_benchmark_swf() -> Vec<u8> {
     b.build()
 }
 
-/// Runs the 120-frame benchmark suite and returns a Markdown summary table (TSD 3.6 M6).
-///
-/// Panics if the average per-frame cost exceeds the 30% regression gate (`<= 5.0 ms/frame` on `ubuntu-latest`).
-#[must_use]
-#[allow(clippy::arithmetic_side_effects, clippy::expect_used, clippy::panic)]
-pub fn run_benchmark_suite() -> String {
-    let swf_bytes = build_benchmark_swf();
-    let t_parse = Instant::now();
-    let mut player =
-        Player::new(&swf_bytes, None, &Options::default()).expect("benchmark SWF must load");
-    let parse_us = t_parse.elapsed().as_micros();
+fn locate_workspace_root() -> PathBuf {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    manifest_dir
+        .parent()
+        .and_then(Path::parent)
+        .map_or(manifest_dir, Path::to_path_buf)
+}
 
+/// Locates and loads the largest real `.swf` file from `corpus/real/cache/` (fetching via
+/// `scripts/fetch_real_corpus.py` if needed).
+#[must_use]
+pub fn load_largest_real_corpus_swf() -> Option<(String, Vec<u8>)> {
+    let root = locate_workspace_root();
+    let cache_dir = root.join("corpus/real/cache");
+    let fetch_script = root.join("scripts/fetch_real_corpus.py");
+
+    let find_best = |dir: &Path| -> Option<(String, Vec<u8>)> {
+        let entries = fs::read_dir(dir).ok()?;
+        let mut best: Option<(String, Vec<u8>)> = None;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("swf") {
+                continue;
+            }
+            let bytes = fs::read(&path).ok()?;
+            let name = path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("real.swf")
+                .to_owned();
+            if best.as_ref().is_none_or(|(_, b)| bytes.len() > b.len()) {
+                best = Some((name, bytes));
+            }
+        }
+        best
+    };
+
+    if let Some(found) = find_best(&cache_dir) {
+        return Some(found);
+    }
+    if fetch_script.exists() {
+        let _ = Command::new("python3").arg(&fetch_script).status();
+    }
+    find_best(&cache_dir)
+}
+
+/// Runs the benchmark suite on BOTH the 10-frame moving-square movie and the largest real file
+/// from `corpus/real/MANIFEST.toml` through the full player path (TSD 3.6 M6, 3.14.6).
+///
+/// Panics if the average per-frame cost exceeds the 30% regression gate (`<= 5.2 ms/frame` in release).
+#[must_use]
+#[allow(
+    clippy::arithmetic_side_effects,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
+pub fn run_benchmark_suite() -> String {
     let frames = 120_u32;
     let input = Input {
-        pointer: Some((160.0, 120.0)),
+        pointer: Some((100.0, 50.0)),
         buttons: 0,
         wheel: 0,
         keys: Vec::new(),
     };
-    let t_run = Instant::now();
-    for _ in 0..frames {
-        let _ = player.run_frame(&input);
+
+    // 1. Benchmark the 10-frame moving-square movie through the full path (TSD 3.14.6).
+    let moving_sq_bytes = build_moving_square_10frame_swf();
+    let t_parse_sq = Instant::now();
+    let mut sq_player = Player::new(&moving_sq_bytes, None, &Options::default())
+        .expect("10-frame moving-square SWF must load");
+    let parse_sq_us = t_parse_sq.elapsed().as_micros();
+
+    let t_run_sq = Instant::now();
+    let mut prev_center_x0_px = 0_u32;
+    for f in 0..frames {
+        let out = sq_player.run_frame(&input);
+        let v = out.video.expect("video frame must be present");
+        let sq_idx = (f % 10) as usize;
+        let expected_x = 20 + sq_idx * 10;
+        let px = v.xrgb[50 * 200 + expected_x];
+        assert_eq!(
+            px, 0x0000_FF00,
+            "moving-square benchmark must render real green square at frame {f}"
+        );
+        if f == 1 {
+            assert_ne!(v.xrgb[50 * 200 + 20], prev_center_x0_px);
+        }
+        prev_center_x0_px = v.xrgb[50 * 200 + 20];
     }
-    let total_run_us = t_run.elapsed().as_micros();
-    let avg_frame_us = total_run_us / u128::from(frames);
-    let avg_frame_ms = (avg_frame_us as f64) / 1000.0;
+    let sq_total_us = t_run_sq.elapsed().as_micros();
+    let sq_avg_us = sq_total_us / u128::from(frames);
+    let sq_avg_ms = (sq_avg_us as f64) / 1000.0;
+
+    // 2. Benchmark the largest real corpus SWF file through the full path (TSD 3.14.6).
+    let (real_name, real_bytes) = load_largest_real_corpus_swf()
+        .unwrap_or_else(|| ("synthetic-fallback.swf".to_owned(), build_benchmark_swf()));
+    let real_size = real_bytes.len();
+    let t_parse_real = Instant::now();
+    let mut real_player = Player::new(&real_bytes, None, &Options::default())
+        .expect("largest real corpus SWF must load through full path");
+    let parse_real_us = t_parse_real.elapsed().as_micros();
+
+    let t_run_real = Instant::now();
+    for _ in 0..frames {
+        let out = real_player.run_frame(&input);
+        let v = out.video.expect("real corpus video frame must be present");
+        assert!(!v.xrgb.is_empty());
+    }
+    let real_total_us = t_run_real.elapsed().as_micros();
+    let real_avg_us = real_total_us / u128::from(frames);
+    let real_avg_ms = (real_avg_us as f64) / 1000.0;
 
     // Baseline budget on ubuntu-latest release is 4.0 ms/frame (16.67 ms = 60 fps); 30% regression gate = 5.2 ms
     let gate_ms = if cfg!(debug_assertions) { 30.0 } else { 5.2 };
     assert!(
-        avg_frame_ms <= gate_ms,
-        "benchmark regression gate exceeded: {avg_frame_ms:.3} ms/frame > {gate_ms:.3} ms/frame (baseline 4.000 ms + 30%)"
+        sq_avg_ms <= gate_ms,
+        "10-frame moving-square regression gate exceeded: {sq_avg_ms:.3} ms/frame > {gate_ms:.3} ms/frame"
+    );
+    assert!(
+        real_avg_ms <= gate_ms,
+        "largest real SWF ({real_name}) regression gate exceeded: {real_avg_ms:.3} ms/frame > {gate_ms:.3} ms/frame"
     );
 
     format!(
-        "| Benchmark Metric | Measured Value | Baseline / Gate |\n| :--- | :--- | :--- |\n| Movie Parse & Init (`320x240`) | `{parse_us} us` | `<= 2000 us` |\n| Per-Frame Step (`AVM1 + tiny-skia + Audio`) | `{avg_frame_ms:.3} ms/frame` (`{avg_frame_us} us`) | Baseline `4.000 ms` (`<= 5.200 ms`, +30% gate) |\n| Equivalent Throughput | `{:.1} fps` | `>= 60.0 fps` (`16.67 ms/frame`) |\n",
-        1000.0 / avg_frame_ms.max(0.001)
+        "| Benchmark Workload | Parse & Init | Per-Frame Step (120 frames) | Throughput | Gate |\n| :--- | :--- | :--- | :--- | :--- |\n| 10-Frame Moving Square (`200x100`) | `{parse_sq_us} us` | `{sq_avg_ms:.3} ms/frame` (`{sq_avg_us} us`) | `{:.1} fps` | `<= 5.200 ms` (+30%) |\n| Largest Real Corpus SWF (`{real_name}`, `{real_size} B`) | `{parse_real_us} us` | `{real_avg_ms:.3} ms/frame` (`{real_avg_us} us`) | `{:.1} fps` | `<= 5.200 ms` (+30%) |\n",
+        1000.0 / sq_avg_ms.max(0.001),
+        1000.0 / real_avg_ms.max(0.001)
     )
 }
 
@@ -340,8 +504,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn harness_formats_stub_av_info() {
-        let av = inspect_av_info(b"SWFR_STUB").unwrap_or_else(|_| unreachable!());
+    fn harness_formats_real_movie_av_info_and_rejects_stub() {
+        assert!(inspect_av_info(b"SWFR_STUB").is_err());
+        let swf = build_benchmark_swf();
+        let av = inspect_av_info(&swf).unwrap_or_else(|_| unreachable!());
         let text = format_av_info(&av);
         assert!(text.contains("width=320 height=240"));
         assert!(text.contains("fps=60.00"));
@@ -349,12 +515,13 @@ mod tests {
     }
 
     #[test]
-    fn harness_formats_full_movie_info_and_runs_bench() {
+    fn harness_formats_full_movie_info_and_runs_honest_bench() {
         let swf = build_benchmark_swf();
         let info = format_movie_info(&swf);
         assert!(info.contains("swf_version=8"));
         assert!(info.contains("tag[DefineShape]: 1"));
         let bench_md = run_benchmark_suite();
-        assert!(bench_md.contains("Per-Frame Step"));
+        assert!(bench_md.contains("10-Frame Moving Square"));
+        assert!(bench_md.contains("Largest Real Corpus SWF"));
     }
 }

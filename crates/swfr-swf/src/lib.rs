@@ -1499,6 +1499,53 @@ fn read_count(r: &mut Reader<'_>, allow_extended: bool) -> Result<usize, ParseEr
     }
 }
 
+fn decode_single_fill_style(r: &mut Reader<'_>, has_alpha: bool) -> Result<FillStyle, ParseError> {
+    let style_type = r.u8()?;
+    let style = match style_type {
+        0x00 => FillStyle::Solid(read_rgba(r, has_alpha)?),
+        0x10 | 0x12 | 0x13 => {
+            let matrix = r.matrix()?;
+            let _spread_and_interp = r.ubits(4)?;
+            let num_grads = usize::try_from(r.ubits(4)?).unwrap_or(0);
+            let mut stops = Vec::with_capacity(num_grads);
+            for _ in 0..num_grads {
+                let ratio = r.u8()?;
+                let color = read_rgba(r, has_alpha)?;
+                stops.push(GradientStop { ratio, color });
+            }
+            let focal_point_q8 = if style_type == 0x13 { r.i16()? } else { 0 };
+            if style_type == 0x10 {
+                FillStyle::LinearGradient { matrix, stops }
+            } else {
+                FillStyle::RadialGradient {
+                    matrix,
+                    stops,
+                    focal_point_q8,
+                }
+            }
+        }
+        0x40..=0x43 => {
+            let bitmap_id = r.u16()?;
+            let matrix = r.matrix()?;
+            let repeating = style_type == 0x40 || style_type == 0x42;
+            let smoothed = style_type == 0x40 || style_type == 0x41;
+            FillStyle::Bitmap {
+                bitmap_id,
+                matrix,
+                repeating,
+                smoothed,
+            }
+        }
+        _ => FillStyle::Solid(Rgba {
+            r: 0,
+            g: 0,
+            b: 0,
+            a: 255,
+        }),
+    };
+    Ok(style)
+}
+
 fn decode_fill_style_array(
     r: &mut Reader<'_>,
     shape_ver: u8,
@@ -1507,50 +1554,7 @@ fn decode_fill_style_array(
     let has_alpha = shape_ver >= 3;
     let mut styles = Vec::with_capacity(count.min(256));
     for _ in 0..count {
-        let style_type = r.u8()?;
-        let style = match style_type {
-            0x00 => FillStyle::Solid(read_rgba(r, has_alpha)?),
-            0x10 | 0x12 | 0x13 => {
-                let matrix = r.matrix()?;
-                let _spread_and_interp = r.ubits(4)?;
-                let num_grads = usize::try_from(r.ubits(4)?).unwrap_or(0);
-                let mut stops = Vec::with_capacity(num_grads);
-                for _ in 0..num_grads {
-                    let ratio = r.u8()?;
-                    let color = read_rgba(r, has_alpha)?;
-                    stops.push(GradientStop { ratio, color });
-                }
-                let focal_point_q8 = if style_type == 0x13 { r.i16()? } else { 0 };
-                if style_type == 0x10 {
-                    FillStyle::LinearGradient { matrix, stops }
-                } else {
-                    FillStyle::RadialGradient {
-                        matrix,
-                        stops,
-                        focal_point_q8,
-                    }
-                }
-            }
-            0x40..=0x43 => {
-                let bitmap_id = r.u16()?;
-                let matrix = r.matrix()?;
-                let repeating = style_type == 0x40 || style_type == 0x42;
-                let smoothed = style_type == 0x40 || style_type == 0x41;
-                FillStyle::Bitmap {
-                    bitmap_id,
-                    matrix,
-                    repeating,
-                    smoothed,
-                }
-            }
-            _ => FillStyle::Solid(Rgba {
-                r: 0,
-                g: 0,
-                b: 0,
-                a: 255,
-            }),
-        };
-        styles.push(style);
+        styles.push(decode_single_fill_style(r, has_alpha)?);
     }
     Ok(styles)
 }
@@ -1565,23 +1569,39 @@ fn decode_line_style_array(
     for _ in 0..count {
         let width_twips = r.u16()?;
         if shape_ver >= 4 {
-            let flags = r.u16()?;
-            let join_style = (flags >> 11) & 0x03;
-            let has_fill = ((flags >> 10) & 0x01) != 0;
+            let _start_cap_style = r.ubits(2)?;
+            let join_style = r.ubits(2)?;
+            let has_fill = r.ubits(1)? != 0;
+            let _no_h_scale = r.ubits(1)? != 0;
+            let _no_v_scale = r.ubits(1)? != 0;
+            let _pixel_hinting = r.ubits(1)? != 0;
+            let _reserved = r.ubits(5)?;
+            let _no_close = r.ubits(1)? != 0;
+            let _end_cap_style = r.ubits(2)?;
             if join_style == 2 {
                 let _miter_limit = r.u16()?;
             }
             if has_fill {
-                let _fill = decode_fill_style_array(r, shape_ver)?;
-                styles.push(LineStyle {
-                    width_twips,
-                    color: Rgba {
+                let fill = decode_single_fill_style(r, true)?;
+                let color = match fill {
+                    FillStyle::Solid(c) => c,
+                    FillStyle::LinearGradient { ref stops, .. }
+                    | FillStyle::RadialGradient { ref stops, .. } => stops
+                        .first()
+                        .map_or(Rgba {
+                            r: 0,
+                            g: 0,
+                            b: 0,
+                            a: 255,
+                        }, |s| s.color),
+                    FillStyle::Bitmap { .. } => Rgba {
                         r: 0,
                         g: 0,
                         b: 0,
                         a: 255,
                     },
-                });
+                };
+                styles.push(LineStyle { width_twips, color });
             } else {
                 let color = read_rgba(r, true)?;
                 styles.push(LineStyle { width_twips, color });
@@ -1750,20 +1770,91 @@ fn decode_morph_shape(
     let mut end_fill_styles = Vec::with_capacity(fill_count.min(128));
     for _ in 0..fill_count {
         let style_type = r.u8()?;
-        if style_type == 0x00 {
-            start_fill_styles.push(FillStyle::Solid(read_rgba(r, true)?));
-            end_fill_styles.push(FillStyle::Solid(read_rgba(r, true)?));
-        } else {
-            let start_mat = r.matrix()?;
-            let end_mat = r.matrix()?;
-            start_fill_styles.push(FillStyle::LinearGradient {
-                matrix: start_mat,
-                stops: Vec::new(),
-            });
-            end_fill_styles.push(FillStyle::LinearGradient {
-                matrix: end_mat,
-                stops: Vec::new(),
-            });
+        match style_type {
+            0x00 => {
+                start_fill_styles.push(FillStyle::Solid(read_rgba(r, true)?));
+                end_fill_styles.push(FillStyle::Solid(read_rgba(r, true)?));
+            }
+            0x10 | 0x12 | 0x13 => {
+                let start_mat = r.matrix()?;
+                let end_mat = r.matrix()?;
+                let num_grads = usize::from(r.u8()? & 0x0F);
+                let mut start_stops = Vec::with_capacity(num_grads);
+                let mut end_stops = Vec::with_capacity(num_grads);
+                for _ in 0..num_grads {
+                    let s_ratio = r.u8()?;
+                    let s_color = read_rgba(r, true)?;
+                    let e_ratio = r.u8()?;
+                    let e_color = read_rgba(r, true)?;
+                    start_stops.push(GradientStop {
+                        ratio: s_ratio,
+                        color: s_color,
+                    });
+                    end_stops.push(GradientStop {
+                        ratio: e_ratio,
+                        color: e_color,
+                    });
+                }
+                let (s_focal, e_focal) = if style_type == 0x13 {
+                    (r.i16()?, r.i16()?)
+                } else {
+                    (0, 0)
+                };
+                if style_type == 0x10 {
+                    start_fill_styles.push(FillStyle::LinearGradient {
+                        matrix: start_mat,
+                        stops: start_stops,
+                    });
+                    end_fill_styles.push(FillStyle::LinearGradient {
+                        matrix: end_mat,
+                        stops: end_stops,
+                    });
+                } else {
+                    start_fill_styles.push(FillStyle::RadialGradient {
+                        matrix: start_mat,
+                        stops: start_stops,
+                        focal_point_q8: s_focal,
+                    });
+                    end_fill_styles.push(FillStyle::RadialGradient {
+                        matrix: end_mat,
+                        stops: end_stops,
+                        focal_point_q8: e_focal,
+                    });
+                }
+            }
+            0x40..=0x43 => {
+                let bitmap_id = r.u16()?;
+                let start_mat = r.matrix()?;
+                let end_mat = r.matrix()?;
+                let repeating = style_type == 0x40 || style_type == 0x42;
+                let smoothed = style_type == 0x40 || style_type == 0x41;
+                start_fill_styles.push(FillStyle::Bitmap {
+                    bitmap_id,
+                    matrix: start_mat,
+                    repeating,
+                    smoothed,
+                });
+                end_fill_styles.push(FillStyle::Bitmap {
+                    bitmap_id,
+                    matrix: end_mat,
+                    repeating,
+                    smoothed,
+                });
+            }
+            _ => {
+                start_fill_styles.push(FillStyle::Solid(Rgba {
+                    r: 0,
+                    g: 0,
+                    b: 0,
+                    a: 255,
+                }));
+                end_fill_styles.push(FillStyle::Solid(Rgba {
+                    r: 0,
+                    g: 0,
+                    b: 0,
+                    a: 255,
+                }));
+            }
         }
     }
 
@@ -1774,7 +1865,35 @@ fn decode_morph_shape(
         let start_w = r.u16()?;
         let end_w = r.u16()?;
         if version >= 2 {
-            let _flags = r.u16()?;
+            let _start_cap = r.ubits(2)?;
+            let join_style = r.ubits(2)?;
+            let has_fill = r.ubits(1)? != 0;
+            let _rest = r.ubits(11)?;
+            if join_style == 2 {
+                let _miter = r.u16()?;
+            }
+            if has_fill {
+                let _fill = decode_single_fill_style(r, true)?;
+                start_line_styles.push(LineStyle {
+                    width_twips: start_w,
+                    color: Rgba {
+                        r: 0,
+                        g: 0,
+                        b: 0,
+                        a: 255,
+                    },
+                });
+                end_line_styles.push(LineStyle {
+                    width_twips: end_w,
+                    color: Rgba {
+                        r: 0,
+                        g: 0,
+                        b: 0,
+                        a: 255,
+                    },
+                });
+                continue;
+            }
         }
         let start_c = read_rgba(r, true)?;
         let end_c = read_rgba(r, true)?;

@@ -11,9 +11,15 @@ crate-type = ["cdylib", "rlib"]
 [features]
 default = []
 fault-inject = []
+m0-stub = ["swfr-player/m0-stub"]
 
 [dependencies]
 swfr-player.workspace = true
+
+[dev-dependencies]
+swfr-reader.workspace = true
+swfr-swf.workspace = true
+swfr-testkit.workspace = true
 
 [lints.rust]
 unsafe_code = "deny"

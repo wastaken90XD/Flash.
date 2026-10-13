@@ -369,7 +369,6 @@ pub struct retro_game_info {
 const LIBRARY_NAME: &CStr = c"swfr";
 const LIBRARY_VERSION: &CStr = c"0.1.0";
 const VALID_EXTENSIONS: &CStr = c"swf";
-const LOG_FMT_STR: &CStr = c"%s\n";
 
 static LEGACY_VARIABLES: [retro_variable; 7] = [
     retro_variable {
@@ -540,6 +539,41 @@ pub fn copy_audio_frames_from_callback_ptr(data: *const i16, frames: usize) -> V
     slice.to_vec()
 }
 
+/// Installs a mock frontend log callback into the `data` pointer passed to
+/// `RETRO_ENVIRONMENT_GET_LOG_INTERFACE` and converts C log strings safely for tests.
+pub fn install_log_callback_in_environment(data: *mut c_void, cb: RetroLogPrintfFn) -> bool {
+    if data.is_null() {
+        return false;
+    }
+    // SAFETY: When `cmd == RETRO_ENVIRONMENT_GET_LOG_INTERFACE`, `data` points to a mutable `retro_log_callback`.
+    let out = unsafe { &mut *data.cast::<retro_log_callback>() };
+    out.log = Some(cb);
+    true
+}
+
+/// Converts a NUL-terminated C string pointer from a callback into an owned `String`.
+#[must_use]
+pub fn copy_c_str_from_callback_ptr(ptr: *const c_char) -> String {
+    if ptr.is_null() {
+        return String::new();
+    }
+    // SAFETY: `ptr` was supplied by `emit_log` from a NUL-terminated byte buffer.
+    unsafe { CStr::from_ptr(ptr) }
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// Casts a non-variadic `extern "C" fn(c_int, *const c_char)` test logger to [`RetroLogPrintfFn`].
+///
+/// Because [`emit_log`] passes the complete formatted message (with `%` escaped) in the fixed
+/// `fmt` parameter without consuming variadic arguments, the fixed parameter ABI matches across
+/// `x86_64`, `i686`, `aarch64`, and `armv7`.
+#[must_use]
+pub fn make_test_log_printf_fn(cb: extern "C" fn(c_int, *const c_char)) -> RetroLogPrintfFn {
+    // SAFETY: `emit_log` invokes `cb(level, fmt)` using only the two fixed arguments (`level` and `fmt`).
+    unsafe { core::mem::transmute::<extern "C" fn(c_int, *const c_char), RetroLogPrintfFn>(cb) }
+}
+
 fn with_global<F, R>(default: R, f: F) -> R
 where
     F: FnOnce(&mut GlobalSlot) -> R,
@@ -580,16 +614,22 @@ fn emit_log(log_cb: Option<RetroLogPrintfFn>, level: LogLevel, message: &str) {
         LogLevel::Error => RETRO_LOG_ERROR,
     };
     if let Some(cb) = log_cb {
-        let clean: String = message.chars().filter(|&c| c != '\0').collect();
+        let mut clean = String::with_capacity(message.len().saturating_add(2));
+        for ch in message.chars() {
+            if ch == '\0' {
+                continue;
+            }
+            if ch == '%' {
+                clean.push('%');
+            }
+            clean.push(ch);
+        }
+        clean.push('\n');
         let mut bytes = clean.into_bytes();
         bytes.push(0);
-        // SAFETY: `bytes` is NUL-terminated and `LOG_FMT_STR` is `"%s\n\0"`, so `cb` reads a valid C string.
+        // SAFETY: `bytes` is NUL-terminated and has all `%` escaped as `%%`, so `cb` reads a valid C string from `fmt`.
         unsafe {
-            cb(
-                retro_level,
-                LOG_FMT_STR.as_ptr(),
-                bytes.as_ptr().cast::<c_char>(),
-            );
+            cb(retro_level, bytes.as_ptr().cast::<c_char>());
         }
     }
 }

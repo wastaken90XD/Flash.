@@ -94,11 +94,11 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    /// Creates a new [`Renderer`] for stage dimensions `(width_px, height_px)` and resolution scale (`1` or `2`).
+    /// Creates a new [`Renderer`] for stage dimensions `(width_px, height_px)` and resolution scale (`1..=4`).
     #[must_use]
     #[allow(clippy::expect_used)]
     pub fn new(width_px: u32, height_px: u32, scale: u32) -> Self {
-        let s = scale.clamp(1, 2);
+        let s = scale.clamp(1, 4);
         let w = width_px.saturating_mul(s).clamp(1, 8192);
         let h = height_px.saturating_mul(s).clamp(1, 8192);
         let pixmap = Pixmap::new(w, h).unwrap_or_else(|| Pixmap::new(1, 1).expect("1x1 pixmap"));
@@ -124,7 +124,7 @@ impl Renderer {
         self.pixmap.height()
     }
 
-    /// Current resolution scale (`1` or `2`).
+    /// Current resolution scale (`1..=4`).
     #[must_use]
     pub const fn scale(&self) -> u32 {
         self.scale
@@ -132,7 +132,7 @@ impl Renderer {
 
     /// Resizes the renderer if `(stage_width_px * scale, stage_height_px * scale)` changed.
     pub fn ensure_size(&mut self, stage_width_px: u32, stage_height_px: u32, scale: u32) -> bool {
-        let s = scale.clamp(1, 2);
+        let s = scale.clamp(1, 4);
         let target_w = stage_width_px.saturating_mul(s).max(1);
         let target_h = stage_height_px.saturating_mul(s).max(1);
         if self.pixmap.width() == target_w && self.pixmap.height() == target_h && self.scale == s {

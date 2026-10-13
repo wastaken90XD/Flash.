@@ -5,6 +5,10 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[features]
+default = []
+m0-stub = []
+
 [dependencies]
 swfr-audio.workspace = true
 swfr-avm1.workspace = true

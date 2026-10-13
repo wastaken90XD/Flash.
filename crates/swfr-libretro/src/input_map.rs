@@ -123,8 +123,8 @@ impl InputTracker {
             pad_click = raw.joypad_south;
         }
 
-        // Pointer touch overrides cursor coordinates when pressed or inside normalized bounds.
-        if raw.pointer_pressed {
+        // Pointer touch overrides cursor coordinates when pressed or explicitly positioned.
+        if raw.pointer_pressed || raw.pointer_x != 0 || raw.pointer_y != 0 {
             let norm_x = (f32::from(raw.pointer_x) + 32767.0) / 65534.0;
             let norm_y = (f32::from(raw.pointer_y) + 32767.0) / 65534.0;
             self.cursor_x = (norm_x * (width as f32)).clamp(0.0, max_w.max(0.0));

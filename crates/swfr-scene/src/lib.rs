@@ -1127,6 +1127,7 @@ impl Stage {
                     frame_count,
                     tags: nested,
                 } => {
+                    self.register_definitions(nested);
                     self.dictionary.insert(
                         *id,
                         Character::Sprite {
@@ -1342,6 +1343,7 @@ fn step_timeline_one_frame(
     dirty: &mut bool,
     events: &mut FrameEvents,
 ) {
+    let existing_depths: Vec<u16> = tl.display_list.keys().copied().collect();
     if !tl.frame0_executed {
         execute_timeline_frame_tags(tl, 0, path, dict, bg, dirty, events, true);
         tl.frame0_executed = true;
@@ -1355,9 +1357,8 @@ fn step_timeline_one_frame(
         execute_timeline_frame_tags(tl, next, path, dict, bg, dirty, events, true);
     }
 
-    // Advance nested DefineSprite timelines independently
-    let depths: Vec<u16> = tl.display_list.keys().copied().collect();
-    for d in depths {
+    // Advance nested DefineSprite timelines that were already present before this step
+    for d in existing_depths {
         let Some(obj) = tl.display_list.get_mut(&d) else {
             continue;
         };

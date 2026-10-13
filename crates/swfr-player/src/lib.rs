@@ -238,7 +238,7 @@ pub struct FrameOut<'a> {
     pub logs: &'a [LogLine],
 }
 
-/// Errors returned when constructing or loading a [`Player`] (TSD 2.6, 2.11).
+/// Errors returned when constructing or loading a [`Player`] (TSD 2.6, 2.11, 3.14).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlayerError {
     /// The input byte slice was empty.
@@ -250,8 +250,10 @@ pub enum PlayerError {
         /// Configured limit in bytes.
         limit: usize,
     },
-    /// The input bytes were explicitly marked as malformed.
+    /// The input bytes contained a malformed or unsupported SWF header.
     MalformedHeader(&'static str),
+    /// Parsing the SWF container or tag stream failed.
+    ParseFailed(String),
 }
 
 impl core::fmt::Display for PlayerError {
@@ -265,6 +267,7 @@ impl core::fmt::Display for PlayerError {
                 )
             }
             Self::MalformedHeader(msg) => write!(f, "malformed SWF header: {msg}"),
+            Self::ParseFailed(msg) => write!(f, "SWF parse error: {msg}"),
         }
     }
 }
@@ -272,6 +275,7 @@ impl core::fmt::Display for PlayerError {
 impl std::error::Error for PlayerError {}
 
 /// SMPTE 8-bar color palette in `0x00RRGGBB` format (White, Yellow, Cyan, Green, Magenta, Red, Blue, Black).
+#[cfg(feature = "m0-stub")]
 const COLOR_BARS_XRGB: [u32; 8] = [
     0x00FF_FFFF,
     0x00FF_FF00,
@@ -292,7 +296,7 @@ struct ActiveRuntime {
     audio: AudioMixer,
 }
 
-/// Frame-stepping SWF player instance (TSD 2.6).
+/// Frame-stepping SWF player instance (TSD 2.6, 3.14).
 #[derive(Debug)]
 pub struct Player {
     stage_width: u32,
@@ -302,6 +306,7 @@ pub struct Player {
     fps_q8: u64,
     fps: f64,
     audio_rem_q8: u64,
+    #[cfg(feature = "m0-stub")]
     tone_sample_idx: u64,
     frame_count: u64,
     options: Options,
@@ -313,12 +318,12 @@ pub struct Player {
 }
 
 impl Player {
-    /// Parses `swf_bytes` and constructs a new [`Player`] instance (TSD 2.6).
+    /// Parses `swf_bytes` and constructs a new [`Player`] instance (TSD 2.6, 3.14).
     ///
     /// # Errors
     ///
     /// Returns [`PlayerError`] if `swf_bytes` is empty, exceeds [`Limits::max_input_file_size`],
-    /// or contains an explicitly truncated header.
+    /// fails SWF parsing, or has invalid stage dimensions.
     #[allow(clippy::arithmetic_side_effects)]
     pub fn new(
         swf_bytes: &[u8],
@@ -336,71 +341,62 @@ impl Player {
             });
         }
 
-        let mut fps_q8: u64 = 60 * 256;
-        let mut parsed_movie: Option<Movie> = None;
+        #[cfg(feature = "m0-stub")]
+        if swf_bytes == b"SWFR_STUB" {
+            return Ok(Self::new_m0_stub(base_dir, opts));
+        }
 
-        if let Some(sig) = swf_bytes.get(0..3) {
-            if sig == b"FWS" || sig == b"CWS" || sig == b"ZWS" {
-                if swf_bytes.len() < 8 {
-                    return Err(PlayerError::MalformedHeader(
-                        "SWF header shorter than 8-byte preamble",
-                    ));
-                }
-                if sig == b"FWS" && swf_bytes.get(8) == Some(&0) {
-                    if let (Some(&lo), Some(&hi)) = (swf_bytes.get(9), swf_bytes.get(10)) {
-                        let raw_q8 = u64::from(u16::from_le_bytes([lo, hi]));
-                        fps_q8 = raw_q8.clamp(256, 120 * 256);
-                    }
-                }
-                if let Ok(m) = Movie::parse(swf_bytes) {
-                    if m.header.frame_size.width_twips() > 0 && !m.tags.is_empty() {
-                        fps_q8 = u64::from(m.header.frame_rate_q8).clamp(256, 120 * 256);
-                        parsed_movie = Some(m);
-                    }
-                }
+        if swf_bytes.len() < 8 {
+            return Err(PlayerError::MalformedHeader(
+                "SWF header shorter than 8-byte preamble",
+            ));
+        }
+
+        let swf_limits = swfr_swf::Limits {
+            max_file_size: limits.max_input_file_size,
+            max_decompressed_size: limits.max_decompressed_size,
+            max_tag_count: limits.max_tag_count,
+            max_shape_edges: limits.max_shape_edges,
+        };
+        let movie = Movie::parse_with_limits(swf_bytes, &swf_limits)
+            .map_err(|e| PlayerError::ParseFailed(e.to_string()))?;
+
+        if movie.header.frame_size.width_twips() <= 0
+            || movie.header.frame_size.height_twips() <= 0
+            || movie.header.frame_count == 0
+            || movie.tags.is_empty()
+        {
+            return Err(PlayerError::MalformedHeader(
+                "invalid zero stage dimensions or empty tag stream",
+            ));
+        }
+
+        let stage_width = movie.header.width_px();
+        let stage_height = movie.header.height_px();
+        let fps_q8 = u64::from(movie.header.frame_rate_q8).clamp(256, 120 * 256);
+        let max_scale = Self::compute_max_scale(stage_width, stage_height);
+        let effective_scale = opts.scale.factor().min(max_scale);
+
+        let stage = Stage::from_movie(&movie);
+        let renderer = Renderer::new(stage_width, stage_height, effective_scale);
+        let mut vm = Avm1::new(movie.header.version);
+        vm.max_ops_per_run = u64::from(opts.script_timeout_secs)
+            .saturating_mul(250_000)
+            .max(10_000);
+        let mut audio = AudioMixer::new();
+        for tag in &movie.tags {
+            if let Tag::DefineSound(snd) = tag {
+                audio.register_sound(snd);
             }
         }
 
-        let (stage_width, stage_height, runtime) = if let Some(movie) = parsed_movie {
-            let sw = movie.header.width_px();
-            let sh = movie.header.height_px();
-            let stage = Stage::from_movie(&movie);
-            let renderer = Renderer::new(sw, sh, opts.scale.factor().clamp(1, 2));
-            let mut vm = Avm1::new(movie.header.version);
-            vm.max_ops_per_run = u64::from(opts.script_timeout_secs)
-                .saturating_mul(250_000)
-                .max(10_000);
-            let mut audio = AudioMixer::new();
-            for tag in &movie.tags {
-                if let Tag::DefineSound(snd) = tag {
-                    audio.register_sound(snd);
-                }
-            }
-            (
-                sw,
-                sh,
-                Some(ActiveRuntime {
-                    movie,
-                    stage,
-                    renderer,
-                    vm,
-                    audio,
-                }),
-            )
-        } else {
-            (DEFAULT_STAGE_WIDTH, DEFAULT_STAGE_HEIGHT, None)
-        };
-
-        let max_scale = Self::compute_max_scale(stage_width, stage_height);
-        let effective_scale = opts.scale.factor().min(max_scale);
         let width = stage_width.saturating_mul(effective_scale);
         let height = stage_height.saturating_mul(effective_scale);
         let pixel_count = usize::try_from(width.saturating_mul(height)).unwrap_or(0);
-
         let fps = (fps_q8 as f64) / 256.0;
         let max_samples_per_frame = (SAMPLE_RATE_HZ as usize).saturating_mul(2);
 
-        let mut player = Self {
+        Ok(Self {
             stage_width,
             stage_height,
             effective_scale,
@@ -408,6 +404,7 @@ impl Player {
             fps_q8,
             fps,
             audio_rem_q8: 0,
+            #[cfg(feature = "m0-stub")]
             tone_sample_idx: 0,
             frame_count: 0,
             options: opts.clone(),
@@ -419,12 +416,50 @@ impl Player {
             },
             audio_buf: Vec::with_capacity(max_samples_per_frame),
             logs: Vec::new(),
-            runtime,
+            runtime: Some(ActiveRuntime {
+                movie,
+                stage,
+                renderer,
+                vm,
+                audio,
+            }),
+        })
+    }
+
+    #[cfg(feature = "m0-stub")]
+    #[allow(clippy::arithmetic_side_effects)]
+    fn new_m0_stub(base_dir: Option<String>, opts: &Options) -> Self {
+        let stage_width = DEFAULT_STAGE_WIDTH;
+        let stage_height = DEFAULT_STAGE_HEIGHT;
+        let fps_q8: u64 = 60 * 256;
+        let max_scale = Self::compute_max_scale(stage_width, stage_height);
+        let effective_scale = opts.scale.factor().min(max_scale);
+        let width = stage_width.saturating_mul(effective_scale);
+        let height = stage_height.saturating_mul(effective_scale);
+        let pixel_count = usize::try_from(width.saturating_mul(height)).unwrap_or(0);
+        let mut player = Self {
+            stage_width,
+            stage_height,
+            effective_scale,
+            max_scale,
+            fps_q8,
+            fps: DEFAULT_FPS,
+            audio_rem_q8: 0,
+            tone_sample_idx: 0,
+            frame_count: 0,
+            options: opts.clone(),
+            base_dir,
+            frame: Frame {
+                width,
+                height,
+                xrgb: vec![0; pixel_count],
+            },
+            audio_buf: Vec::with_capacity((SAMPLE_RATE_HZ as usize).saturating_mul(2)),
+            logs: Vec::new(),
+            runtime: None,
         };
-        if player.runtime.is_none() {
-            player.render_color_bars();
-        }
-        Ok(player)
+        player.render_color_bars();
+        player
     }
 
     /// Returns the loaded movie's geometry and timing metadata (TSD 2.5, 2.6).
@@ -474,6 +509,7 @@ impl Player {
             if let Some(ref mut rt) = self.runtime {
                 rt.stage.full_redraw = true;
             } else {
+                #[cfg(feature = "m0-stub")]
                 self.render_color_bars();
             }
         }
@@ -492,7 +528,7 @@ impl Player {
         self.frame_count
     }
 
-    /// Advances the player by one frame and produces video, stereo audio, and logs (TSD 2.6).
+    /// Advances the player by one frame and produces video, stereo audio, and logs (TSD 2.6, 3.14).
     #[allow(clippy::arithmetic_side_effects)]
     pub fn run_frame(&mut self, input: &Input) -> FrameOut<'_> {
         self.logs.clear();
@@ -511,10 +547,23 @@ impl Player {
                 rt.vm.set_key_state(kev.keycode, kev.down);
             }
 
-            // 2. Deliver pointer input to Stage and execute any triggered button actions
+            // 2. Advance timeline by 1 frame and execute frame actions + sound tags
+            let frame_events = rt.stage.step_frame();
+            Self::dispatch_events(
+                frame_events,
+                &mut rt.stage,
+                &mut rt.vm,
+                &mut rt.audio,
+                stereo_frames,
+                self.options.trace_to_log,
+                &mut self.logs,
+            );
+
+            // 3. Deliver pointer input to Stage and execute any triggered button actions
             if let Some((px, py)) = input.pointer {
-                let x_twips = (px * 20.0).round() as i32;
-                let y_twips = (py * 20.0).round() as i32;
+                let scale_f = self.effective_scale.max(1) as f32;
+                let x_twips = ((px / scale_f) * 20.0).round() as i32;
+                let y_twips = ((py / scale_f) * 20.0).round() as i32;
                 let pressed = (input.buttons & 1) != 0;
                 let btn_events = rt.stage.update_pointer(x_twips, y_twips, pressed);
                 Self::dispatch_events(
@@ -528,18 +577,6 @@ impl Player {
                 );
             }
 
-            // 3. Advance timeline by 1 frame and execute frame actions + sound tags
-            let frame_events = rt.stage.step_frame();
-            Self::dispatch_events(
-                frame_events,
-                &mut rt.stage,
-                &mut rt.vm,
-                &mut rt.audio,
-                stereo_frames,
-                self.options.trace_to_log,
-                &mut self.logs,
-            );
-
             // 4. Advance deterministic timers
             let delta_ms = (1000.0 / self.fps.max(1.0)).round() as u64;
             rt.vm.step_timers(&mut rt.stage, delta_ms);
@@ -551,7 +588,7 @@ impl Player {
             );
 
             // 5. Render stage at effective scale
-            let render_scale = self.effective_scale.clamp(1, 2);
+            let render_scale = self.effective_scale.clamp(1, 4);
             let _ = rt.renderer.render_stage(&mut rt.stage, render_scale);
             self.frame.width = rt.renderer.width();
             self.frame.height = rt.renderer.height();
@@ -568,23 +605,32 @@ impl Player {
             };
         }
 
-        // Stub fallback (SMPTE color bars + 440 Hz sine tone)
-        let sample_len = stereo_frames.saturating_mul(2);
-        self.audio_buf.clear();
-        self.audio_buf.resize(sample_len, 0);
+        #[cfg(feature = "m0-stub")]
+        {
+            let sample_len = stereo_frames.saturating_mul(2);
+            self.audio_buf.clear();
+            self.audio_buf.resize(sample_len, 0);
 
-        let two_pi_440 = core::f64::consts::TAU * 440.0 / f64::from(SAMPLE_RATE_HZ);
-        for frame_idx in 0..stereo_frames {
-            let phase = (self.tone_sample_idx as f64) * two_pi_440;
-            let sample = (phase.sin() * 8_000.0) as i16;
-            let base = frame_idx.saturating_mul(2);
-            if let Some(left) = self.audio_buf.get_mut(base) {
-                *left = sample;
+            let two_pi_440 = core::f64::consts::TAU * 440.0 / f64::from(SAMPLE_RATE_HZ);
+            for frame_idx in 0..stereo_frames {
+                let phase = (self.tone_sample_idx as f64) * two_pi_440;
+                let sample = (phase.sin() * 8_000.0) as i16;
+                let base = frame_idx.saturating_mul(2);
+                if let Some(left) = self.audio_buf.get_mut(base) {
+                    *left = sample;
+                }
+                if let Some(right) = self.audio_buf.get_mut(base.saturating_add(1)) {
+                    *right = sample;
+                }
+                self.tone_sample_idx = self.tone_sample_idx.wrapping_add(1);
             }
-            if let Some(right) = self.audio_buf.get_mut(base.saturating_add(1)) {
-                *right = sample;
-            }
-            self.tone_sample_idx = self.tone_sample_idx.wrapping_add(1);
+        }
+
+        #[cfg(not(feature = "m0-stub"))]
+        {
+            let sample_len = stereo_frames.saturating_mul(2);
+            self.audio_buf.clear();
+            self.audio_buf.resize(sample_len, 0);
         }
 
         FrameOut {
@@ -597,7 +643,10 @@ impl Player {
     /// Resets the player back to frame 1 and clears runtime state (TSD 2.5, 2.6).
     pub fn reset(&mut self) {
         self.audio_rem_q8 = 0;
-        self.tone_sample_idx = 0;
+        #[cfg(feature = "m0-stub")]
+        {
+            self.tone_sample_idx = 0;
+        }
         self.frame_count = 0;
         self.logs.clear();
         if let Some(ref mut rt) = self.runtime {
@@ -613,6 +662,7 @@ impl Player {
                 }
             }
         } else {
+            #[cfg(feature = "m0-stub")]
             self.render_color_bars();
         }
     }
@@ -683,6 +733,7 @@ impl Player {
         best
     }
 
+    #[cfg(feature = "m0-stub")]
     fn render_color_bars(&mut self) {
         let width = self.frame.width.max(1);
         let height = self.frame.height;
@@ -714,6 +765,7 @@ mod tests {
     use super::*;
     use swfr_testkit::{ActionBuilder, SwfBuilder};
 
+    #[cfg(feature = "m0-stub")]
     #[test]
     fn stub_player_renders_320x240_color_bars_and_440hz_tone() {
         let opts = Options::default();
@@ -737,11 +789,28 @@ mod tests {
         assert!(out.audio.iter().any(|&s| s != 0));
     }
 
+    #[cfg(not(feature = "m0-stub"))]
+    #[test]
+    fn default_player_rejects_stub_and_malformed_bytes() {
+        let opts = Options::default();
+        assert!(Player::new(b"", None, &opts).is_err());
+        assert!(Player::new(b"SWFR_STUB", None, &opts).is_err());
+        assert!(Player::new(b"FWS\x08\x0d\x00\x00\x00\x00\x00\x0c\x01\x00", None, &opts).is_err());
+    }
+
     #[test]
     fn fractional_audio_carry_600_runs_at_12fps_equals_2205000_frames() {
-        let swf_12fps = b"FWS\x08\x0d\x00\x00\x00\x00\x00\x0c\x01\x00";
+        let mut b = SwfBuilder::new(8, 320, 240, 12.0, 1);
+        b.push_tag(&Tag::SetBackgroundColor {
+            r: 0xFF,
+            g: 0xFF,
+            b: 0xFF,
+        });
+        b.push_tag(&Tag::ShowFrame);
+        let swf_12fps = b.build();
+
         let mut player =
-            Player::new(swf_12fps, None, &Options::default()).unwrap_or_else(|_| unreachable!());
+            Player::new(&swf_12fps, None, &Options::default()).unwrap_or_else(|_| unreachable!());
         assert!((player.av_info().fps - 12.0).abs() < f64::EPSILON);
 
         let mut total_stereo_frames: usize = 0;

@@ -1,16 +1,70 @@
-# Real-world SWF test corpus manifest (TSD 1.6).
-# Real SWF binaries are never committed to Git; CI fetches them into cache.
+# Real-world SWF test corpus manifest (TSD 1.6, 3.14.5, 3.14.6).
+# Real SWF binaries are never committed to Git; CI fetches them into cache (`corpus/real/cache/`).
 # Every [[file]] entry MUST include a non-empty license, url, sha256, and source_page.
 # Owned by @wastaken90XD via CODEOWNERS.
 
-# Example entry format:
-# [[file]]
-# name = "example-game"
-# url = "https://example.org/example.swf"
-# sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
-# license = "CC0-1.0"
-# source_page = "https://example.org/"
-# swf_version = 8
-# frames_to_capture = [1, 30]
+[[file]]
+name = "ruffle-goto-frame"
+url = "https://raw.githubusercontent.com/ruffle-rs/ruffle/2372a4e148a67d68efd796f4477b3cddd4f880cd/tests/tests/swfs/avm1/goto_frame/test.swf"
+api_path = "repos/ruffle-rs/ruffle/contents/tests/tests/swfs/avm1/goto_frame/test.swf?ref=2372a4e148a67d68efd796f4477b3cddd4f880cd"
+sha256 = "fbcae4b5765845ac2acf47bebdf39c8144922f1c897162c5bb93901cbe680cca"
+size_bytes = 494
+license = "MIT OR Apache-2.0"
+source_page = "https://github.com/ruffle-rs/ruffle/tree/2372a4e148a67d68efd796f4477b3cddd4f880cd/tests/tests/swfs/avm1/goto_frame"
+swf_version = 15
+frames_to_capture = [1, 30, 120]
 
-file = []
+[[file]]
+name = "ruffle-button-order"
+url = "https://raw.githubusercontent.com/ruffle-rs/ruffle/2372a4e148a67d68efd796f4477b3cddd4f880cd/tests/tests/swfs/avm1/button_order/test.swf"
+api_path = "repos/ruffle-rs/ruffle/contents/tests/tests/swfs/avm1/button_order/test.swf?ref=2372a4e148a67d68efd796f4477b3cddd4f880cd"
+sha256 = "d9e8fde9f420a98a5148966d2753c978bd0631fc64f4d68bf57062bb192286f9"
+size_bytes = 704
+license = "MIT OR Apache-2.0"
+source_page = "https://github.com/ruffle-rs/ruffle/tree/2372a4e148a67d68efd796f4477b3cddd4f880cd/tests/tests/swfs/avm1/button_order"
+swf_version = 15
+frames_to_capture = [1, 30, 120]
+
+[[file]]
+name = "ruffle-edittext-indent"
+url = "https://raw.githubusercontent.com/ruffle-rs/ruffle/2372a4e148a67d68efd796f4477b3cddd4f880cd/tests/tests/swfs/avm1/edittext_tag_indent/test.swf"
+api_path = "repos/ruffle-rs/ruffle/contents/tests/tests/swfs/avm1/edittext_tag_indent/test.swf?ref=2372a4e148a67d68efd796f4477b3cddd4f880cd"
+sha256 = "efcd312e467a20f0217becac38665229ae417697853abf1796f481c6151131ff"
+size_bytes = 743
+license = "MIT OR Apache-2.0"
+source_page = "https://github.com/ruffle-rs/ruffle/tree/2372a4e148a67d68efd796f4477b3cddd4f880cd/tests/tests/swfs/avm1/edittext_tag_indent"
+swf_version = 8
+frames_to_capture = [1, 30, 120]
+
+[[file]]
+name = "ruffle-movieclip-depth"
+url = "https://raw.githubusercontent.com/ruffle-rs/ruffle/2372a4e148a67d68efd796f4477b3cddd4f880cd/tests/tests/swfs/avm1/movieclip_depth_methods/test.swf"
+api_path = "repos/ruffle-rs/ruffle/contents/tests/tests/swfs/avm1/movieclip_depth_methods/test.swf?ref=2372a4e148a67d68efd796f4477b3cddd4f880cd"
+sha256 = "419fc4f6d7a92f671c55ef3a0a5173c89e92893bb5e5b6be3a25e691a3ae9314"
+size_bytes = 757
+license = "MIT OR Apache-2.0"
+source_page = "https://github.com/ruffle-rs/ruffle/tree/2372a4e148a67d68efd796f4477b3cddd4f880cd/tests/tests/swfs/avm1/movieclip_depth_methods"
+swf_version = 15
+frames_to_capture = [1, 30, 120]
+
+[[file]]
+name = "ruffle-clip-events"
+url = "https://raw.githubusercontent.com/ruffle-rs/ruffle/2372a4e148a67d68efd796f4477b3cddd4f880cd/tests/tests/swfs/avm1/clip_events/test.swf"
+api_path = "repos/ruffle-rs/ruffle/contents/tests/tests/swfs/avm1/clip_events/test.swf?ref=2372a4e148a67d68efd796f4477b3cddd4f880cd"
+sha256 = "6d8cdbd9c8d8b6ebd117e7840274b317ec1f30eab1f83b92eaeca407cc34d47c"
+size_bytes = 953
+license = "MIT OR Apache-2.0"
+source_page = "https://github.com/ruffle-rs/ruffle/tree/2372a4e148a67d68efd796f4477b3cddd4f880cd/tests/tests/swfs/avm1/clip_events"
+swf_version = 15
+frames_to_capture = [1, 30, 120]
+
+[[file]]
+name = "ruffle-sound"
+url = "https://raw.githubusercontent.com/ruffle-rs/ruffle/2372a4e148a67d68efd796f4477b3cddd4f880cd/tests/tests/swfs/avm1/sound/test.swf"
+api_path = "repos/ruffle-rs/ruffle/contents/tests/tests/swfs/avm1/sound/test.swf?ref=2372a4e148a67d68efd796f4477b3cddd4f880cd"
+sha256 = "13499896ffb2898a4decf3f0294c5c7acdd4a3a36a49ca32b1ad25f38bac601a"
+size_bytes = 6336
+license = "MIT OR Apache-2.0"
+source_page = "https://github.com/ruffle-rs/ruffle/tree/2372a4e148a67d68efd796f4477b3cddd4f880cd/tests/tests/swfs/avm1/sound"
+swf_version = 17
+frames_to_capture = [1, 30, 120]
