@@ -1403,11 +1403,11 @@ fn execute_timeline_frame_tags(
     let Some(&(start, end)) = tl.frame_tag_ranges.get(usize::from(frame_idx)) else {
         return;
     };
-    let Some(slice) = tl.tags.get(start..end) else {
+    let Some(slice) = tl.tags.get(start..end).map(<[Tag]>::to_vec) else {
         return;
     };
 
-    for tag in slice {
+    for tag in &slice {
         match tag {
             Tag::SetBackgroundColor { r, g, b } => {
                 *bg = Rgba::rgb(*r, *g, *b);

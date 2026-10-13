@@ -940,7 +940,7 @@ impl Movie {
             Compression::Uncompressed => raw_bytes.get(8..).unwrap_or(&[]).to_vec(),
             Compression::Zlib => {
                 let compressed = raw_bytes.get(8..).unwrap_or(&[]);
-                let decompressed = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(
+                miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(
                     compressed,
                     limits.max_decompressed_size,
                 )
@@ -949,8 +949,7 @@ impl Movie {
                     kind: ParseErrorKind::DecompressionError(
                         "zlib decompression failed or exceeded limit",
                     ),
-                })?;
-                decompressed
+                })?
             }
             Compression::Lzma => {
                 // ZWS header: [0..4 sig+ver][4..8 uncomp_len][8..12 comp_len][12..17 lzma_props][17.. payload]
