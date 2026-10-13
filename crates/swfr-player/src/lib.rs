@@ -353,7 +353,7 @@ impl Player {
         }
 
         let swf_limits = swfr_swf::Limits {
-            max_file_size: limits.max_input_file_size,
+            max_input_file_size: limits.max_input_file_size,
             max_decompressed_size: limits.max_decompressed_size,
             max_tag_count: limits.max_tag_count,
             max_shape_edges: limits.max_shape_edges,

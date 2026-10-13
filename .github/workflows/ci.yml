@@ -323,6 +323,10 @@ jobs:
           cargo metadata --locked >/dev/null 2>&1 || cargo generate-lockfile
           python3 scripts/fetch_real_corpus.py || true
           BENCH_TABLE=$(cargo run --release -p swfr-harness -- bench 2>/dev/null || echo "| Benchmark | N/A | N/A |")
+          DIAG=""
+          if [ "${RES_LINTS}" != "success" ] || [ "${RES_BUILD}" != "success" ] || [ "${RES_ABI}" != "success" ] || [ "${RES_CORPUS}" != "success" ] || [ "${RES_BENCH}" != "success" ]; then
+            DIAG=$( (cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && SWFR_REQUIRE_REAL_CORPUS=1 cargo test -p swfr-libretro -- --test-threads=1 && cargo test --workspace --exclude swfr-libretro) 2>&1 | tail -n 120 || true )
+          fi
           {
             printf '%s\n' "<!-- swfr-ci-report -->"
             printf '%s\n' "## \`swfr\` CI Verification Report (\`${GITHUB_SHA}\`)"
@@ -340,6 +344,9 @@ jobs:
             printf '%s\n' "### Per-Frame Performance Benchmark (\`swfr-harness bench\`)"
             printf '\n'
             printf '%s\n' "${BENCH_TABLE}"
+            if [ -n "${DIAG}" ]; then
+              printf '\n### Diagnostic Tail\n```text\n%s\n```\n' "${DIAG}"
+            fi
           } > report.md
 
           cat report.md >> "${GITHUB_STEP_SUMMARY}"

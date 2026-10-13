@@ -24,9 +24,7 @@ jobs:
 
       - name: Synchronize Cargo.lock and formatting
         run: |
-          if [ ! -f Cargo.lock ]; then
-            cargo generate-lockfile
-          fi
+          cargo metadata --locked >/dev/null 2>&1 || cargo generate-lockfile
           cargo fmt --all
 
       - name: Commit and push if changed
