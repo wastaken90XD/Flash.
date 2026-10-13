@@ -1166,8 +1166,8 @@ fn e2e_m4_savestate_roundtrip_and_streaming_audio_via_abi() {
             depth: 1,
             character_id: if f == 0 { Some(1) } else { None },
             matrix: Some(Matrix {
-                translate_x: x_twips,
-                translate_y: y_twips,
+                translate_x_twips: x_twips,
+                translate_y_twips: y_twips,
                 ..Matrix::IDENTITY
             }),
             color_transform: None,
