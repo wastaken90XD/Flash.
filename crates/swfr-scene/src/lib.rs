@@ -1003,10 +1003,7 @@ fn clean_swf_jpeg_stream(raw: &[u8]) -> Vec<u8> {
     let mut seen_soi = false;
     while i < len {
         // Strip internal `FF D9 FF D8` or `FF D8 FF D9` glue sequences between tables and scan
-        if i + 4 <= len
-            && raw.get(i..i + 4) == Some(&[0xFF, 0xD9, 0xFF, 0xD8])
-            && i + 4 < len
-        {
+        if i + 4 <= len && raw.get(i..i + 4) == Some(&[0xFF, 0xD9, 0xFF, 0xD8]) && i + 4 < len {
             if !seen_soi {
                 out.extend_from_slice(&[0xFF, 0xD8]);
                 seen_soi = true;
@@ -1733,14 +1730,7 @@ fn sync_variable_in_timeline(
 ) {
     for obj in tl.display_list.values_mut() {
         if let Some(ref mut child_tl) = obj.sprite_timeline {
-            sync_variable_in_timeline(
-                child_tl,
-                dict,
-                clean_target,
-                value,
-                case_sensitive,
-                changed,
-            );
+            sync_variable_in_timeline(child_tl, dict, clean_target, value, case_sensitive, changed);
         }
         if let Some(Character::EditText(edit)) = dict.get(&obj.character_id) {
             let clean_var = edit

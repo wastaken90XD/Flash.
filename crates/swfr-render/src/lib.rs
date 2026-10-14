@@ -550,7 +550,7 @@ fn render_compiled_shape(
                     if cx == ColorTransform::IDENTITY {
                         if let Some(bmp_pm) = cache.get_or_insert_bitmap(bmp) {
                             let shader =
-                                Pattern::new(bmp_pm.as_ref(), spread, quality, 1.0, pat_xform);
+                                Pattern::new((&*bmp_pm).as_ref(), spread, quality, 1.0, pat_xform);
                             let paint = Paint {
                                 shader,
                                 anti_alias: true,
@@ -611,7 +611,7 @@ fn render_bitmap_quad(
     if cx == ColorTransform::IDENTITY {
         if let Some(bmp_pm) = cache.get_or_insert_bitmap(bmp) {
             let shader = Pattern::new(
-                bmp_pm.as_ref(),
+                (&*bmp_pm).as_ref(),
                 SpreadMode::Pad,
                 FilterQuality::Bilinear,
                 1.0,
