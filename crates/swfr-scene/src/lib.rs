@@ -1438,11 +1438,12 @@ impl Stage {
     /// Synchronizes any `DefineEditText` instances whose `variable_name` matches `var_name`.
     pub fn sync_variable(&mut self, var_name: &str, value: &str) {
         let dict = &self.dictionary;
+        let clean_target = var_name.trim_start_matches("_root.");
         let mut changed = false;
         for obj in self.root.display_list.values_mut() {
             if let Some(Character::EditText(edit)) = dict.get(&obj.character_id) {
                 let clean_var = edit.variable_name.trim_start_matches("_root.");
-                if !clean_var.is_empty() && clean_var == var_name {
+                if !clean_var.is_empty() && clean_var == clean_target {
                     if obj.dynamic_text.as_deref() != Some(value) {
                         obj.dynamic_text = Some(value.to_owned());
                         changed = true;
@@ -1656,6 +1657,14 @@ fn step_timeline_one_frame(
         tl.frame0_executed = true;
     } else if tl.playing && tl.frame_count > 1 {
         let next = (tl.current_frame.saturating_add(1)) % tl.frame_count;
+        let saved_state: BTreeMap<u16, (u16, Option<String>, ButtonState)> = if next == 0 {
+            tl.display_list
+                .iter()
+                .map(|(&d, o)| (d, (o.character_id, o.dynamic_text.clone(), o.button_state)))
+                .collect()
+        } else {
+            BTreeMap::new()
+        };
         if next == 0 {
             tl.display_list.clear();
             *dirty = true;
@@ -1672,6 +1681,18 @@ fn step_timeline_one_frame(
             &mut frame_events,
             true,
         );
+        if next == 0 {
+            for (d, obj) in &mut tl.display_list {
+                if let Some((saved_cid, saved_text, saved_btn)) = saved_state.get(d) {
+                    if *saved_cid == obj.character_id {
+                        if saved_text.is_some() {
+                            obj.dynamic_text.clone_from(saved_text);
+                        }
+                        obj.button_state = *saved_btn;
+                    }
+                }
+            }
+        }
     }
 
     // Advance surviving pre-existing nested DefineSprite timelines and collect enterFrame events
@@ -1733,6 +1754,11 @@ fn seek_timeline(
     events: &mut FrameEvents,
 ) {
     let clamped = target_frame.min(tl.frame_count.saturating_sub(1));
+    let saved_state: BTreeMap<u16, (u16, Option<String>, ButtonState)> = tl
+        .display_list
+        .iter()
+        .map(|(&d, o)| (d, (o.character_id, o.dynamic_text.clone(), o.button_state)))
+        .collect();
     tl.display_list.clear();
     for f in 0..=clamped {
         let emit_actions = f == clamped;
@@ -1747,6 +1773,16 @@ fn seek_timeline(
             events,
             emit_actions,
         );
+    }
+    for (d, obj) in &mut tl.display_list {
+        if let Some((saved_cid, saved_text, saved_btn)) = saved_state.get(d) {
+            if *saved_cid == obj.character_id {
+                if saved_text.is_some() {
+                    obj.dynamic_text.clone_from(saved_text);
+                }
+                obj.button_state = *saved_btn;
+            }
+        }
     }
     tl.current_frame = clamped;
     tl.playing = play_after;

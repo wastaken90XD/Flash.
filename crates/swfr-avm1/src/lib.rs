@@ -1242,12 +1242,34 @@ impl Avm1 {
     }
 
     /// Sets the key state for `Key.isDown(code)` and `Key.getCode()`.
+    ///
+    /// Also maps libretro `retro_key` codes (`RETROK_UP = 273`, `RETROK_DOWN = 274`,
+    /// `RETROK_RIGHT = 275`, `RETROK_LEFT = 276`, `RETROK_a..=RETROK_z = 97..=122`,
+    /// `RETROK_RSHIFT/LSHIFT = 303..=304`, `RETROK_RCTRL/LCTRL = 305..=306`) to their
+    /// Adobe Flash `Key.*` virtual keycode equivalents (`38`, `40`, `39`, `37`, `65..=90`,
+    /// `16`, `17`) so SWF movies checking either `retro_key` or Flash virtual keycodes work.
     pub fn set_key_state(&mut self, key_code: u32, down: bool) {
+        let flash_alias = match key_code {
+            273 => Some(38),                     // RETROK_UP -> Key.UP
+            274 => Some(40),                     // RETROK_DOWN -> Key.DOWN
+            275 => Some(39),                     // RETROK_RIGHT -> Key.RIGHT
+            276 => Some(37),                     // RETROK_LEFT -> Key.LEFT
+            97..=122 => Some(key_code - 32),     // RETROK_a..z -> 'A'..'Z'
+            303 | 304 => Some(16),               // RETROK_RSHIFT/LSHIFT -> Key.SHIFT
+            305 | 306 => Some(17),               // RETROK_RCTRL/LCTRL -> Key.CONTROL
+            _ => None,
+        };
         if down {
             self.keys_down.insert(key_code);
-            self.last_key_code = key_code;
+            if let Some(alias) = flash_alias {
+                self.keys_down.insert(alias);
+            }
+            self.last_key_code = flash_alias.unwrap_or(key_code);
         } else {
             self.keys_down.remove(&key_code);
+            if let Some(alias) = flash_alias {
+                self.keys_down.remove(&alias);
+            }
         }
     }
 

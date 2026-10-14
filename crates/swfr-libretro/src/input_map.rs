@@ -50,6 +50,14 @@ pub struct RawInputSnapshot {
 pub struct InputTracker {
     cursor_x: f32,
     cursor_y: f32,
+    cursor_visible: bool,
+    prev_up: bool,
+    prev_down: bool,
+    prev_left: bool,
+    prev_right: bool,
+    prev_south: bool,
+    prev_east: bool,
+    prev_start: bool,
     queued_keys: Vec<KeyEvent>,
 }
 
@@ -66,8 +74,22 @@ impl InputTracker {
         Self {
             cursor_x: 160.0,
             cursor_y: 120.0,
+            cursor_visible: false,
+            prev_up: false,
+            prev_down: false,
+            prev_left: false,
+            prev_right: false,
+            prev_south: false,
+            prev_east: false,
+            prev_start: false,
             queued_keys: Vec::new(),
         }
+    }
+
+    /// Returns whether the software cursor reticle should be rendered on the video frame.
+    #[must_use]
+    pub const fn cursor_visible(&self) -> bool {
+        self.cursor_visible
     }
 
     /// Queues a keyboard event received from `retro_keyboard_event_t`.
@@ -76,7 +98,7 @@ impl InputTracker {
     }
 
     /// Converts a [`RawInputSnapshot`] into a [`swfr_player::Input`] for a stage of `(width, height)`.
-    #[allow(clippy::arithmetic_side_effects)]
+    #[allow(clippy::arithmetic_side_effects, clippy::too_many_lines)]
     pub fn build_frame_input(
         &mut self,
         raw: &RawInputSnapshot,
@@ -92,6 +114,10 @@ impl InputTracker {
         if raw.mouse_dx != 0 || raw.mouse_dy != 0 {
             self.cursor_x = (self.cursor_x + f32::from(raw.mouse_dx)).clamp(0.0, max_w.max(0.0));
             self.cursor_y = (self.cursor_y + f32::from(raw.mouse_dy)).clamp(0.0, max_h.max(0.0));
+            self.cursor_visible = true;
+        }
+        if raw.mouse_left || raw.mouse_right || raw.mouse_middle {
+            self.cursor_visible = true;
         }
 
         // Apply joypad movement when in cursor mode.
@@ -118,9 +144,35 @@ impl InputTracker {
             if raw.analog_left_y.abs() > 4096 {
                 dy += (f32::from(raw.analog_left_y) / 32767.0) * speed;
             }
+            if dx != 0.0 || dy != 0.0 || raw.joypad_south {
+                self.cursor_visible = true;
+            }
             self.cursor_x = (self.cursor_x + dx).clamp(0.0, max_w.max(0.0));
             self.cursor_y = (self.cursor_y + dy).clamp(0.0, max_h.max(0.0));
             pad_click = raw.joypad_south;
+        }
+
+        // Emit Flash virtual key events on joypad button transitions so both keyboard-driven
+        // Flash games (e.g. Pacman, Tetris) and cursor-driven Flash movies work out-of-the-box.
+        let joypad_transitions = [
+            (raw.joypad_left, &mut self.prev_left, 37_u32),
+            (raw.joypad_up, &mut self.prev_up, 38_u32),
+            (raw.joypad_right, &mut self.prev_right, 39_u32),
+            (raw.joypad_down, &mut self.prev_down, 40_u32),
+            (raw.joypad_south, &mut self.prev_south, 32_u32),
+            (raw.joypad_east, &mut self.prev_east, 13_u32),
+            (raw.joypad_start, &mut self.prev_start, 13_u32),
+        ];
+        for (now, prev, keycode) in joypad_transitions {
+            if now != *prev {
+                *prev = now;
+                self.queued_keys.push(KeyEvent {
+                    keycode,
+                    character: 0,
+                    modifiers: 0,
+                    down: now,
+                });
+            }
         }
 
         // Pointer touch overrides cursor coordinates when pressed or explicitly positioned.

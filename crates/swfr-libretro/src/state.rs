@@ -242,9 +242,17 @@ impl CoreState {
         );
 
         if let Some(player) = self.player.as_mut() {
-            let out = player.run_frame(&input);
-            let sram = out.logs; // borrow check: copy save_ram after borrowing out
-            let _ = sram;
+            let _ = player.run_frame(&input);
+            if self.input_tracker.cursor_visible() {
+                if let Some((cx, cy)) = input.pointer {
+                    player.draw_software_cursor(
+                        cx.round() as i32,
+                        cy.round() as i32,
+                        (input.buttons & 1) != 0,
+                    );
+                }
+            }
+            let out = player.last_frame_out();
             let (video_pixels, width, height) = match out.video {
                 Some(frame) => (
                     Some(frame.xrgb.as_slice()),

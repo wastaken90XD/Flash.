@@ -702,6 +702,27 @@ pub fn build_interactive_showcase_swf() -> Vec<u8> {
         data: pcm,
     }));
 
+    // Character 8: Sprite wrapper around indicator shape (Character 7) so it can host CLIPACTIONS
+    b.push_tag(&Tag::DefineSprite {
+        id: 8,
+        frame_count: 1,
+        tags: vec![
+            Tag::PlaceObject2(PlaceObject2Tag {
+                is_move: false,
+                depth: 1,
+                character_id: Some(7),
+                matrix: Some(Matrix::IDENTITY),
+                color_transform: None,
+                ratio: None,
+                name: None,
+                clip_depth: None,
+                clip_actions_raw: None,
+            }),
+            Tag::ShowFrame,
+            Tag::End,
+        ],
+    });
+
     // Frame 1: Place interactive Button (depth 1), HUD EditText (depth 2), and moving indicator (depth 3)
     b.push_tag(&Tag::PlaceObject2(PlaceObject2Tag {
         is_move: false,
@@ -725,10 +746,18 @@ pub fn build_interactive_showcase_swf() -> Vec<u8> {
         clip_depth: None,
         clip_actions_raw: None,
     }));
+    let mut ab_key = ActionBuilder::new();
+    ab_key
+        .push_str("hud")
+        .push_str("KEY PRESSED")
+        .set_var()
+        .push_str("key_pressed")
+        .trace();
+    let clip_actions_raw = swfr_testkit::encode_clip_actions(8, &[(0x0000_0040, ab_key.build())]);
     b.push_tag(&Tag::PlaceObject2(PlaceObject2Tag {
         is_move: false,
         depth: 3,
-        character_id: Some(7),
+        character_id: Some(8),
         matrix: Some(Matrix {
             translate_x_twips: 600,
             translate_y_twips: 1300,
@@ -736,9 +765,9 @@ pub fn build_interactive_showcase_swf() -> Vec<u8> {
         }),
         color_transform: None,
         ratio: None,
-        name: None,
+        name: Some("indicator".to_owned()),
         clip_depth: None,
-        clip_actions_raw: None,
+        clip_actions_raw: Some(clip_actions_raw),
     }));
     let mut ab_init = ActionBuilder::new();
     ab_init.push_str("hud").push_str("SWFR READY").set_var();

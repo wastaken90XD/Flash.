@@ -763,6 +763,25 @@ impl Player {
         }
     }
 
+    /// Overlays the software cursor reticle onto the current video frame at `(x_px, y_px)`.
+    pub fn draw_software_cursor(&mut self, x_px: i32, y_px: i32, pressed: bool) {
+        if let Some(ref mut rt) = self.runtime {
+            rt.renderer.draw_cursor(x_px, y_px, pressed);
+            self.frame.xrgb.clear();
+            self.frame.xrgb.extend_from_slice(rt.renderer.xrgb8888());
+        }
+    }
+
+    /// Returns the most recently rendered [`FrameOut`] (after any optional cursor overlay).
+    #[must_use]
+    pub fn last_frame_out(&self) -> FrameOut<'_> {
+        FrameOut {
+            video: Some(&self.frame),
+            audio: &self.audio_buf,
+            logs: &self.logs,
+        }
+    }
+
     fn dispatch_events(
         events: FrameEvents,
         stage: &mut Stage,
