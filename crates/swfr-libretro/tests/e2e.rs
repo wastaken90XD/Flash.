@@ -2062,11 +2062,7 @@ fn e2e_hard_area_swf1_swf2_morph_mixed_fills_nellymoser_speex_and_skipped_frames
     retro_run();
     {
         let fe = FRONTEND.lock().unwrap();
-        let traces: Vec<String> = fe
-            .logs
-            .iter()
-            .map(|(_, s)| s.trim().to_owned())
-            .collect();
+        let traces: Vec<String> = fe.logs.iter().map(|(_, s)| s.trim().to_owned()).collect();
         assert_eq!(
             traces,
             vec![
