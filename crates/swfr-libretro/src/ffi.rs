@@ -567,6 +567,20 @@ pub fn extract_keyboard_callback_from_environment(
     kb.callback
 }
 
+/// Invokes a [`RetroKeyboardEventFn`] callback captured from `RETRO_ENVIRONMENT_SET_KEYBOARD_CALLBACK`.
+pub fn invoke_keyboard_callback(
+    cb: RetroKeyboardEventFn,
+    down: bool,
+    keycode: c_uint,
+    character: u32,
+    key_modifiers: u16,
+) {
+    // SAFETY: `cb` is the core's own `retro_keyboard_event_t` callback registered during `retro_set_environment`.
+    unsafe {
+        cb(down, keycode, character, key_modifiers);
+    }
+}
+
 /// Converts a NUL-terminated C string pointer from a callback into an owned `String`.
 #[must_use]
 pub fn copy_c_str_from_callback_ptr(ptr: *const c_char) -> String {

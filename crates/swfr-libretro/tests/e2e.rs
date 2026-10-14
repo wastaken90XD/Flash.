@@ -17,16 +17,16 @@ use std::sync::Mutex;
 use swfr_libretro::ffi::{
     copy_audio_frames_from_callback_ptr, copy_c_str_from_callback_ptr, copy_memory_bytes_from_ptr,
     copy_video_frame_from_callback_ptr, extract_keyboard_callback_from_environment,
-    install_log_callback_in_environment, make_test_log_printf_fn, retro_deinit,
-    retro_game_geometry, retro_game_info, retro_get_memory_data, retro_get_memory_size,
-    retro_get_system_av_info, retro_init, retro_load_game, retro_reset, retro_run, retro_serialize,
-    retro_serialize_size, retro_set_audio_sample, retro_set_audio_sample_batch,
-    retro_set_environment, retro_set_input_poll, retro_set_input_state, retro_set_video_refresh,
-    retro_system_av_info, retro_system_timing, retro_unload_game, retro_unserialize,
-    RetroKeyboardEventFn, RETRO_DEVICE_ID_POINTER_PRESSED, RETRO_DEVICE_ID_POINTER_X,
-    RETRO_DEVICE_ID_POINTER_Y, RETRO_DEVICE_POINTER, RETRO_ENVIRONMENT_GET_LOG_INTERFACE,
-    RETRO_ENVIRONMENT_SET_KEYBOARD_CALLBACK, RETRO_ENVIRONMENT_SET_PIXEL_FORMAT,
-    RETRO_MEMORY_SAVE_RAM,
+    install_log_callback_in_environment, invoke_keyboard_callback, make_test_log_printf_fn,
+    retro_deinit, retro_game_geometry, retro_game_info, retro_get_memory_data,
+    retro_get_memory_size, retro_get_system_av_info, retro_init, retro_load_game, retro_reset,
+    retro_run, retro_serialize, retro_serialize_size, retro_set_audio_sample,
+    retro_set_audio_sample_batch, retro_set_environment, retro_set_input_poll,
+    retro_set_input_state, retro_set_video_refresh, retro_system_av_info, retro_system_timing,
+    retro_unload_game, retro_unserialize, RetroKeyboardEventFn, RETRO_DEVICE_ID_POINTER_PRESSED,
+    RETRO_DEVICE_ID_POINTER_X, RETRO_DEVICE_ID_POINTER_Y, RETRO_DEVICE_POINTER,
+    RETRO_ENVIRONMENT_GET_LOG_INTERFACE, RETRO_ENVIRONMENT_SET_KEYBOARD_CALLBACK,
+    RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, RETRO_MEMORY_SAVE_RAM,
 };
 use swfr_reader::{ColorTransform, Matrix, Rect};
 use swfr_swf::{
@@ -1621,7 +1621,7 @@ fn e2e_hard_area_event_order_load_unload_button_mouse_key_via_abi() {
 
     // Queue a keyDown event via the registered retro_keyboard_event_t callback and press pointer at center (0, 0)
     let kb_cb = FRONTEND.lock().unwrap().keyboard_cb.unwrap();
-    kb_cb(true, 65, u32::from(b'a'), 0);
+    invoke_keyboard_callback(kb_cb, true, 65, u32::from(b'a'), 0);
     {
         let mut fe = FRONTEND.lock().unwrap();
         fe.pointer_x = 0;
@@ -1660,7 +1660,7 @@ fn e2e_hard_area_event_order_load_unload_button_mouse_key_via_abi() {
     }
 
     // Queue keyUp and pointer move + release on Frame 2
-    kb_cb(false, 65, u32::from(b'a'), 0);
+    invoke_keyboard_callback(kb_cb, false, 65, u32::from(b'a'), 0);
     {
         let mut fe = FRONTEND.lock().unwrap();
         fe.pointer_x = 100;
