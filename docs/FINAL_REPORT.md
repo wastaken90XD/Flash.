@@ -28,10 +28,10 @@ Every item below names the exact Rust `#[test]` function identifier(s) and passi
 ## 2. TSD 3.1 Definition of Done Checklist
 
 - [x] **1. Every required CI job is green:**
-  - `ci.yml`: [Run #38486527709](https://github.com/wastaken90XD/Flash./actions/runs/38486527709) (push) / [Run #38486532489](https://github.com/wastaken90XD/Flash./actions/runs/38486532489) (PR) — `lints`, `build-test` (`ubuntu`, `macos`, `windows`), `abi` (`ubuntu`, `macos`, `windows` + `e2e` + `fault-inject`), `corpus-real` (`20` real SWFs x `120` frames), `size-check`, `bench`, `cross-build`, and `ci-report` all **green**.
-  - `lockfile.yml`: [Run #38486527615](https://github.com/wastaken90XD/Flash./actions/runs/38486527615) — **green**.
-  - `cross.yml`: [Run #38486527624](https://github.com/wastaken90XD/Flash./actions/runs/38486527624) (push) / [Run #38486532480](https://github.com/wastaken90XD/Flash./actions/runs/38486532480) (PR) — all target jobs including QEMU `armv7-unknown-linux-gnueabihf` `abi` + `e2e` execution **green**.
-  - `release.yml`: [Run #38486527622](https://github.com/wastaken90XD/Flash./actions/runs/38486527622) — all release packaging jobs **green**.
+  - `ci.yml`: [Run #38492963886](https://github.com/wastaken90XD/Flash./actions/runs/38492963886) (push) / [Run #38492968436](https://github.com/wastaken90XD/Flash./actions/runs/38492968436) (PR) — `lints`, `build-test` (`ubuntu`, `macos`, `windows`), `abi` (`ubuntu`, `macos`, `windows` + `e2e` + `fault-inject`), `corpus-real` (`20` real SWFs x `120` frames), `ffdec-crosscheck`, `size-check`, `bench`, `cross-build`, and `ci-report` all **green**.
+  - `lockfile.yml`: [Run #38492963857](https://github.com/wastaken90XD/Flash./actions/runs/38492963857) — **green**.
+  - `cross.yml`: [Run #38492963846](https://github.com/wastaken90XD/Flash./actions/runs/38492963846) (push) / [Run #38492968349](https://github.com/wastaken90XD/Flash./actions/runs/38492968349) (PR) — all target jobs including QEMU `armv7-unknown-linux-gnueabihf` `abi` + `e2e` execution **green**.
+  - `release.yml`: [Run #38492963856](https://github.com/wastaken90XD/Flash./actions/runs/38492963856) — all release packaging jobs **green**.
 - [x] **2. Milestones M0 through M6 implemented and re-audited under TSD 3.14:**
   - Self-audits: [`docs/audits/m0.md`](../blob/arena/a4bfe02a-flash/docs/audits/m0.md), [`docs/audits/m1.md`](../blob/arena/a4bfe02a-flash/docs/audits/m1.md), [`docs/audits/m2.md`](../blob/arena/a4bfe02a-flash/docs/audits/m2.md), [`docs/audits/m3.md`](../blob/arena/a4bfe02a-flash/docs/audits/m3.md), [`docs/audits/m4.md`](../blob/arena/a4bfe02a-flash/docs/audits/m4.md), [`docs/audits/m5.md`](../blob/arena/a4bfe02a-flash/docs/audits/m5.md), [`docs/audits/m6.md`](../blob/arena/a4bfe02a-flash/docs/audits/m6.md).
   - Status & worklog: [`STATUS.md`](../blob/arena/a4bfe02a-flash/STATUS.md) and [`WORKLOG.md`](../blob/arena/a4bfe02a-flash/WORKLOG.md).
