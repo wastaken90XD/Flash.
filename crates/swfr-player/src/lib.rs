@@ -763,12 +763,46 @@ impl Player {
         }
     }
 
-    /// Overlays the software cursor reticle onto the current video frame at `(x_px, y_px)`.
+    /// Overlays the software cursor reticle onto the current video frame at `(x_px, y_px)`
+    /// without mutating the underlying stage renderer buffer (so static 1-frame SWFs never leave trails).
+    #[allow(clippy::arithmetic_side_effects)]
     pub fn draw_software_cursor(&mut self, x_px: i32, y_px: i32, pressed: bool) {
-        if let Some(ref mut rt) = self.runtime {
-            rt.renderer.draw_cursor(x_px, y_px, pressed);
-            self.frame.xrgb.clear();
-            self.frame.xrgb.extend_from_slice(rt.renderer.xrgb8888());
+        let w = self.frame.width as i32;
+        let h = self.frame.height as i32;
+        let outer = if pressed {
+            0x00FF_4040_u32
+        } else {
+            0x0000_0000_u32
+        };
+        let inner = if pressed {
+            0x00FF_FF00_u32
+        } else {
+            0x00FF_FFFF_u32
+        };
+
+        for dy in -4..=4 {
+            for dx in -4..=4 {
+                let px = x_px + dx;
+                let py = y_px + dy;
+                if px < 0 || py < 0 || px >= w || py >= h {
+                    continue;
+                }
+                let dist = dx.abs() + dy.abs();
+                let color = if dist <= 1 || (dx == 0 && dy.abs() <= 3) || (dy == 0 && dx.abs() <= 3)
+                {
+                    Some(inner)
+                } else if dist <= 4 && (dx.abs() <= 1 || dy.abs() <= 1) {
+                    Some(outer)
+                } else {
+                    None
+                };
+                if let Some(c) = color {
+                    let idx = (py * w + px) as usize;
+                    if let Some(slot) = self.frame.xrgb.get_mut(idx) {
+                        *slot = c;
+                    }
+                }
+            }
         }
     }
 

@@ -843,10 +843,19 @@ fn builtin_char_path(ch: char, x: f32, y: f32, w: f32, h: f32) -> Option<Path> {
     let by = y + h;
 
     match ch.to_ascii_uppercase() {
-        '0' | 'O' | 'D' => {
+        '0' | 'O' => {
             pb.move_to(x, y);
             pb.line_to(rx, y);
             pb.line_to(rx, by);
+            pb.line_to(x, by);
+            pb.close();
+        }
+        'D' => {
+            pb.move_to(x, y);
+            pb.line_to(x + w * 0.7, y);
+            pb.line_to(rx, y + h * 0.25);
+            pb.line_to(rx, y + h * 0.75);
+            pb.line_to(x + w * 0.7, by);
             pb.line_to(x, by);
             pb.close();
         }
@@ -950,17 +959,30 @@ fn builtin_char_path(ch: char, x: f32, y: f32, w: f32, h: f32) -> Option<Path> {
             pb.move_to(x, my);
             pb.line_to(rx, my);
         }
+        'K' => {
+            pb.move_to(x, y);
+            pb.line_to(x, by);
+            pb.move_to(rx, y);
+            pb.line_to(x, my);
+            pb.line_to(rx, by);
+        }
         'L' => {
             pb.move_to(x, y);
             pb.line_to(x, by);
             pb.line_to(rx, by);
         }
-        'M' | 'N' => {
+        'M' => {
             pb.move_to(x, by);
             pb.line_to(x, y);
             pb.line_to(mx, my);
             pb.line_to(rx, y);
             pb.line_to(rx, by);
+        }
+        'N' => {
+            pb.move_to(x, by);
+            pb.line_to(x, y);
+            pb.line_to(rx, by);
+            pb.line_to(rx, y);
         }
         'P' | 'R' => {
             pb.move_to(x, by);
@@ -978,17 +1000,36 @@ fn builtin_char_path(ch: char, x: f32, y: f32, w: f32, h: f32) -> Option<Path> {
             pb.move_to(mx, y);
             pb.line_to(mx, by);
         }
-        'U' | 'V' | 'W' => {
+        'U' => {
             pb.move_to(x, y);
             pb.line_to(x, by);
             pb.line_to(rx, by);
             pb.line_to(rx, y);
         }
-        'X' | 'K' | 'Y' => {
+        'V' => {
+            pb.move_to(x, y);
+            pb.line_to(mx, by);
+            pb.line_to(rx, y);
+        }
+        'W' => {
+            pb.move_to(x, y);
+            pb.line_to(x + w * 0.25, by);
+            pb.line_to(mx, my);
+            pb.line_to(x + w * 0.75, by);
+            pb.line_to(rx, y);
+        }
+        'X' => {
             pb.move_to(x, y);
             pb.line_to(rx, by);
             pb.move_to(rx, y);
             pb.line_to(x, by);
+        }
+        'Y' => {
+            pb.move_to(x, y);
+            pb.line_to(mx, my);
+            pb.line_to(rx, y);
+            pb.move_to(mx, my);
+            pb.line_to(mx, by);
         }
         '-' => {
             pb.move_to(x, my);

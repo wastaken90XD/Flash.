@@ -600,20 +600,41 @@ pub fn build_interactive_showcase_swf() -> Vec<u8> {
         records: rect_records(0, 0, 480, 240),
     }));
 
-    // Character 2: Dynamic EditText HUD at top of stage
+    // Character 2: Dynamic EditText status HUD at bottom of stage ("SWFR READY" -> "BTN CLICKED" / "KEY PRESSED")
     b.push_tag(&Tag::DefineEditText(EditTextDef {
         id: 2,
         bounds: Rect {
             x_min: 600,
             x_max: 5800,
-            y_min: 200,
-            y_max: 1100,
+            y_min: 3920,
+            y_max: 4680,
         },
-        font_id: None,
-        font_height_twips: 440,
+        font_id: Some(99),
+        font_height_twips: 360,
         color: Rgba::rgb(0x40, 0xFF, 0x90),
         variable_name: "hud".to_owned(),
         initial_text: Some("SWFR READY".to_owned()),
+        word_wrap: false,
+        multiline: false,
+        read_only: true,
+        html: false,
+        use_outlines: false,
+    }));
+
+    // Character 9: Top HUD header ("SWFR 60FPS") for V4 text/font verification
+    b.push_tag(&Tag::DefineEditText(EditTextDef {
+        id: 9,
+        bounds: Rect {
+            x_min: 600,
+            x_max: 5800,
+            y_min: 140,
+            y_max: 800,
+        },
+        font_id: Some(99),
+        font_height_twips: 360,
+        color: Rgba::rgb(0xFF, 0xE0, 0x40),
+        variable_name: "header_hud".to_owned(),
+        initial_text: Some("SWFR 60FPS".to_owned()),
         word_wrap: false,
         multiline: false,
         read_only: true,
@@ -723,7 +744,7 @@ pub fn build_interactive_showcase_swf() -> Vec<u8> {
         ],
     });
 
-    // Frame 1: Place interactive Button (depth 1), HUD EditText (depth 2), and moving indicator (depth 3)
+    // Frame 1: Place interactive Button (depth 1), bottom HUD EditText (depth 2), moving indicator (depth 3), and top header HUD (depth 4)
     b.push_tag(&Tag::PlaceObject2(PlaceObject2Tag {
         is_move: false,
         depth: 1,
@@ -746,6 +767,17 @@ pub fn build_interactive_showcase_swf() -> Vec<u8> {
         clip_depth: None,
         clip_actions_raw: None,
     }));
+    b.push_tag(&Tag::PlaceObject2(PlaceObject2Tag {
+        is_move: false,
+        depth: 4,
+        character_id: Some(9),
+        matrix: Some(Matrix::IDENTITY),
+        color_transform: None,
+        ratio: None,
+        name: None,
+        clip_depth: None,
+        clip_actions_raw: None,
+    }));
     let mut ab_key = ActionBuilder::new();
     ab_key
         .push_str("hud")
@@ -760,7 +792,7 @@ pub fn build_interactive_showcase_swf() -> Vec<u8> {
         character_id: Some(8),
         matrix: Some(Matrix {
             translate_x_twips: 600,
-            translate_y_twips: 1300,
+            translate_y_twips: 1050,
             ..Matrix::IDENTITY
         }),
         color_transform: None,
@@ -795,7 +827,7 @@ pub fn build_interactive_showcase_swf() -> Vec<u8> {
             character_id: None,
             matrix: Some(Matrix {
                 translate_x_twips: 600 + f * 240,
-                translate_y_twips: 1300,
+                translate_y_twips: 1050,
                 ..Matrix::IDENTITY
             }),
             color_transform: None,

@@ -1377,9 +1377,12 @@ impl Stage {
                     (ButtonState::Up, true, true, true) if prev_pressed_in => {
                         (ButtonState::Down, 0x0020) // OutDownToOverDown
                     }
-                    (ButtonState::Up, true, _, true) => {
+                    (ButtonState::Up, true, false, true) => {
                         obj.button_pressed_inside = true;
                         (ButtonState::Down, 0x0001 | 0x0004 | 0x0080) // IdleToOverUp | OverUpToOverDown | IdleToOverDown
+                    }
+                    (ButtonState::Up, true, true, true) if btn.track_as_menu => {
+                        (ButtonState::Down, 0x0080) // IdleToOverDown
                     }
                     (ButtonState::Over, false, _, false) => (ButtonState::Up, 0x0002), // OverUpToIdle
                     (ButtonState::Over, true, false, true) => {
