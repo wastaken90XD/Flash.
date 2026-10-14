@@ -1543,9 +1543,7 @@ impl Avm1 {
         target_frame: u16,
         play_after: bool,
     ) {
-        let prev_frame = stage
-            .timeline_by_path(path)
-            .map_or(0, |t| t.current_frame);
+        let prev_frame = stage.timeline_by_path(path).map_or(0, |t| t.current_frame);
         let ev = stage.goto_frame(path, target_frame, play_after);
         let new_frame = stage
             .timeline_by_path(path)
@@ -1733,7 +1731,8 @@ impl Avm1 {
                             _ => None,
                         };
                         let inst_id = self.heap.alloc_object(proto);
-                        let _ = self.invoke_user_function(ctor_id, Some(inst_id), args, stage, budget);
+                        let _ =
+                            self.invoke_user_function(ctor_id, Some(inst_id), args, stage, budget);
                         Value::Object(inst_id)
                     } else {
                         Value::Object(self.heap.alloc_object(None))
@@ -1750,11 +1749,11 @@ impl Avm1 {
                     let superclass = self.pop();
                     let subclass = self.pop();
                     if let (Value::Object(sub_id), Value::Object(sup_id)) = (subclass, superclass) {
-                        let sup_proto = match self.heap.get_prop(sup_id, "prototype", self.swf_version)
-                        {
-                            Value::Object(pid) => Some(pid),
-                            _ => None,
-                        };
+                        let sup_proto =
+                            match self.heap.get_prop(sup_id, "prototype", self.swf_version) {
+                                Value::Object(pid) => Some(pid),
+                                _ => None,
+                            };
                         let sub_proto = self.heap.alloc_object(sup_proto);
                         self.heap.set_prop(
                             sub_id,
@@ -1800,7 +1799,8 @@ impl Avm1 {
                     } else {
                         None
                     };
-                    let _ = self.run_ops_inner(body_ops, this_obj, locals, stage, budget, depth + 1);
+                    let _ =
+                        self.run_ops_inner(body_ops, this_obj, locals, stage, budget, depth + 1);
                     if let Some(prev) = prev_clip {
                         self.current_clip_path = prev;
                     }

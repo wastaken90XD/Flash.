@@ -2100,7 +2100,7 @@ fn e2e_real_world_flash8_placeobject3_definefunction2_preloader_and_sprite_movem
     sp_f1.push_str("sp_f1").trace();
     let mut sp_f2 = ActionBuilder::new();
     sp_f2.push_str("sp_f2").trace().stop();
-    b.push_tag(&Tag::DefineSprite(swfr_swf::SpriteDef {
+    b.push_tag(&Tag::DefineSprite {
         id: 2,
         frame_count: 2,
         tags: vec![
@@ -2125,7 +2125,7 @@ fn e2e_real_world_flash8_placeobject3_definefunction2_preloader_and_sprite_movem
             Tag::ShowFrame,
             Tag::End,
         ],
-    }));
+    });
 
     // PlaceObject3 (tag 70) raw payload with has_character(0x02) | has_matrix(0x04) | has_name(0x20)
     // and flags2 = has_filter_list(0x01) | has_blend_mode(0x02)

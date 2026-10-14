@@ -836,7 +836,7 @@ impl Player {
         for tag in tags {
             match tag {
                 Tag::DefineSound(snd) => audio.register_sound(snd),
-                Tag::DefineSprite(sp) => Self::register_sounds(&sp.tags, audio),
+                Tag::DefineSprite { tags: sub_tags, .. } => Self::register_sounds(sub_tags, audio),
                 _ => {}
             }
         }
