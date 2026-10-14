@@ -2029,33 +2029,19 @@ impl Stage {
                 &mut dirty,
                 &mut events,
             );
-        } else if let Some(rel) = canon.strip_prefix("_root.") {
-            let mut cur_tl = &mut self.root;
-            let mut resolved = true;
-            for seg in rel.split('.') {
-                if let Some(obj) = find_child_in_timeline_mut(cur_tl, seg) {
-                    if let Some(ref mut st) = obj.sprite_timeline {
-                        cur_tl = st;
-                        continue;
-                    }
-                }
-                resolved = false;
-                break;
-            }
-            if resolved {
-                seek_timeline(
-                    cur_tl,
-                    &canon,
-                    swf_version,
-                    target_frame,
-                    play_after,
-                    &self.dictionary,
-                    &mut self.executed_init_actions,
-                    &mut bg,
-                    &mut dirty,
-                    &mut events,
-                );
-            }
+        } else if let Some(tl) = find_timeline_mut_in(&mut self.root, &canon) {
+            seek_timeline(
+                tl,
+                &canon,
+                swf_version,
+                target_frame,
+                play_after,
+                &self.dictionary,
+                &mut self.executed_init_actions,
+                &mut bg,
+                &mut dirty,
+                &mut events,
+            );
         }
         self.background_color = bg;
         self.full_redraw = true;
@@ -2205,6 +2191,18 @@ fn find_child_in_timeline_mut<'a>(
         })
         .map(|(&d, _)| d)?;
     tl.display_list.get_mut(&matching_depth)
+}
+
+fn find_timeline_mut_in<'a>(root: &'a mut Timeline, canon: &str) -> Option<&'a mut Timeline> {
+    if canon == "_root" {
+        return Some(root);
+    }
+    let mut cur = root;
+    for seg in canon.strip_prefix("_root.")?.split('.') {
+        let obj = find_child_in_timeline_mut(cur, seg)?;
+        cur = obj.sprite_timeline.as_mut()?;
+    }
+    Some(cur)
 }
 
 #[allow(clippy::too_many_arguments)]
