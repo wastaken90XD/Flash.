@@ -818,8 +818,7 @@ fn stitch_edges(edges: &[DirectedEdge], close_contours: bool) -> Vec<PathCmd> {
             }
             let mut next_match = None;
             if let Some((cursor, bucket)) = start_map.get_mut(&cur_pt) {
-                while *cursor < bucket.len() {
-                    let cand_idx = bucket[*cursor];
+                while let Some(&cand_idx) = bucket.get(*cursor) {
                     *cursor += 1;
                     if !used.get(cand_idx).copied().unwrap_or(true) {
                         if let Some(&cand) = edges.get(cand_idx) {
@@ -1530,9 +1529,7 @@ impl Stage {
             || trimmed.starts_with("_level0.")
             || trimmed.starts_with("_level0/");
 
-        let mut parts: Vec<&str> = if is_abs {
-            vec!["_root"]
-        } else if base_path.is_empty() || base_path == "/" {
+        let mut parts: Vec<&str> = if is_abs || base_path.is_empty() || base_path == "/" {
             vec!["_root"]
         } else {
             base_path.split('.').collect()
