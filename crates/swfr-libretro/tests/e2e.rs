@@ -34,7 +34,7 @@ use swfr_swf::{
     GradientStop, LosslessBitmapDef, MorphShapeDef, PlaceObject2Tag, PlaceObjectTag, Rgba,
     ShapeDef, ShapeRecord, SoundDef, SoundFormat, SoundInfo, SoundStreamHeadDef, Tag,
 };
-use swfr_testkit::{encode_clip_actions, ActionBuilder, SwfBuilder};
+use swfr_testkit::{compress_zlib, encode_clip_actions, ActionBuilder, SwfBuilder};
 
 /// Serializes tests in this binary because the libretro C ABI operates on a single global instance.
 static E2E_LOCK: Mutex<()> = Mutex::new(());
@@ -1516,7 +1516,7 @@ fn e2e_hard_area_event_order_load_unload_button_mouse_key_via_abi() {
             character_id: 1,
             depth: 1,
             matrix: Matrix::IDENTITY,
-            color_transform: None,
+            color_transform: ColorTransform::IDENTITY,
         }],
         actions: vec![
             ButtonAction {
@@ -1838,7 +1838,7 @@ fn e2e_hard_area_swf1_swf2_morph_mixed_fills_nellymoser_speex_and_skipped_frames
     b_ms.push_tag(&Tag::DefineSound(SoundDef {
         id: 10,
         format: SoundFormat::Nellymoser,
-        rate_code: 2,
+        sample_rate_code: 2,
         is_16bit: true,
         is_stereo: false,
         sample_count: 100,
@@ -1926,7 +1926,7 @@ fn e2e_hard_area_swf1_swf2_morph_mixed_fills_nellymoser_speex_and_skipped_frames
         raw_2x2.extend_from_slice(&[255, 255, 0, 0]);
         raw_2x2.extend_from_slice(&[255, 0, 0, 255]);
     }
-    let zlib_2x2 = miniz_oxide::deflate::compress_to_vec_zlib(&raw_2x2, 6);
+    let zlib_2x2 = compress_zlib(&raw_2x2);
     let build_bmp_movie = |ver: u8| -> Vec<u8> {
         let mut b = SwfBuilder::new(ver, 80, 40, 30.0, 1);
         b.push_tag(&Tag::SetBackgroundColor { r: 0, g: 0, b: 0 });

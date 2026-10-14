@@ -1642,6 +1642,14 @@ impl ActionBuilder {
         self
     }
 
+    /// Emits `ActionGotoFrame2` (`0x9F`, pops target frame number or label from stack).
+    pub fn goto_frame2(&mut self, play: bool) -> &mut Self {
+        self.bytes.push(0x9F);
+        self.bytes.extend_from_slice(&1_u16.to_le_bytes());
+        self.bytes.push(u8::from(play));
+        self
+    }
+
     /// Emits `ActionIf` (`0x9D`, signed 16-bit byte offset).
     pub fn branch_if(&mut self, offset: i16) -> &mut Self {
         self.bytes.push(0x9D);
@@ -1937,4 +1945,10 @@ pub fn encode_clip_actions(swf_version: u8, records: &[(u32, Vec<u8>)]) -> Vec<u
         w.write_u16(0);
     }
     w.into_bytes()
+}
+
+/// Compresses raw pixel or payload bytes with Zlib (`miniz_oxide`).
+#[must_use]
+pub fn compress_zlib(raw: &[u8]) -> Vec<u8> {
+    compress_to_vec_zlib(raw, 6)
 }
