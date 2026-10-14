@@ -743,6 +743,7 @@ fn render_button(
             button_pressed_inside: false,
             dynamic_text: None,
             sprite_timeline: None,
+            clip_actions: Vec::new(),
         };
         let child_xform = parent_xform.pre_concat(matrix_to_skia(rec.matrix));
         let child_cx = combine_cxform(parent_cx, rec.color_transform);

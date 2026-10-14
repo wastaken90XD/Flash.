@@ -1326,7 +1326,7 @@ impl Avm1 {
         let mut hops = 0_usize;
         while !self.pending_goto_actions.is_empty() && hops < 16 && !self.watchdog_tripped {
             hops += 1;
-            let batch: Vec<Vec<u8>> = self.pending_goto_actions.drain(..).collect();
+            let batch: Vec<Vec<u8>> = core::mem::take(&mut self.pending_goto_actions);
             for code in batch {
                 let target_ops = decode_ops(&code);
                 let mut target_locals = BTreeMap::new();

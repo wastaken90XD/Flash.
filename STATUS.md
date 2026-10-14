@@ -9,7 +9,7 @@
   - `release.yml`: [Run #38486527622](https://github.com/wastaken90XD/Flash./actions/runs/38486527622) — `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `armv7-unknown-linux-gnueabihf`, `x86_64-pc-windows-msvc`, `x86_64-apple-darwin`, `aarch64-apple-darwin`: **all `success`**
   - `lockfile.yml`: [Run #38486527615](https://github.com/wastaken90XD/Flash./actions/runs/38486527615): **`success`**
 - **Open `human-test` Issues:** [#2 (V1)](https://github.com/wastaken90XD/Flash./issues/2), [#4 (V2)](https://github.com/wastaken90XD/Flash./issues/4), [#5 (V3)](https://github.com/wastaken90XD/Flash./issues/5), [#6 (V4)](https://github.com/wastaken90XD/Flash./issues/6), [#7 (V5)](https://github.com/wastaken90XD/Flash./issues/7), [#8 (V6)](https://github.com/wastaken90XD/Flash./issues/8), [#9 (V7)](https://github.com/wastaken90XD/Flash./issues/9)
-- **Open `question` Issues:** [#3](https://github.com/wastaken90XD/Flash./issues/3)
+- **Open `question` Issues:** [#3](https://github.com/wastaken90XD/Flash./issues/3), [#11](https://github.com/wastaken90XD/Flash./issues/11)
 - **Engineering-Complete Report Issue:** [#10](https://github.com/wastaken90XD/Flash./issues/10)
 
 ---
@@ -56,6 +56,6 @@
 | 3 | **TSD 4.7.3 & 4.6.10:** Write event-order tests for item 10 (`load` after parent timeline code and before clip's own code and before rendering; `unload` in first frame clip is gone before parent timeline code; button, mouse, and key handlers run immediately when their event happens) and record result in `DECISIONS.md` | `e2e_hard_area_event_order_load_unload_button_mouse_key_via_abi` (`crates/swfr-libretro/tests/e2e.rs`), [`DECISIONS.md` (`D-010`, `D-011`)](DECISIONS.md) | PASS |
 | 4 | **TSD 4.7.4 & 4.4:** Add `expectation = "verified"` or `"derived"` to every conformance test's meta, and show both counts in `ci-report` (`verified = 0`, `derived = 160`) | `avm1_es3_conformance_160_generated_movies` (`crates/swfr-avm1/tests/conformance.rs`), `.github/workflows/ci.yml` (`ci-report`) | PASS |
 | 5 | **TSD 4.7.5 & 4.5:** Add optional `ffdec-crosscheck` job (`continue-on-error: true`) when Java is available on the runner to compare tag sequences and report mismatches without failing the build | `.github/workflows/ci.yml` (`ffdec-crosscheck`) | PASS |
-| 6 | **TSD 4.7.6:** Open a `[question]` issue asking the owner to decide on the `corpus-ext` job and the Ruffle `swf` test oracle, and continue without them | `.github/workflows/ci.yml` (`ci-report` idempotent `[question]` issue creation) | PASS |
+| 6 | **TSD 4.7.6:** Open a `[question]` issue asking the owner to decide on the `corpus-ext` job and the Ruffle `swf` test oracle, and continue without them | [Issue #11](https://github.com/wastaken90XD/Flash./issues/11), `.github/workflows/ci.yml` (`ci-report`) | PASS |
 | 7 | **TSD 4.7.7:** Check the public issues of `ruffle_libretro` for input, audio, and timing problems, and add relevant items to `docs/KNOWN_LIMITATIONS.md` | [`docs/KNOWN_LIMITATIONS.md` Section 12](docs/KNOWN_LIMITATIONS.md) | PASS |
 
