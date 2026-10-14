@@ -1600,9 +1600,7 @@ impl Avm1 {
         play_after: bool,
     ) {
         let canon = self.canonical_target(path);
-        let prev_frame = stage
-            .find_timeline(&canon)
-            .map_or(0, |t| t.current_frame);
+        let prev_frame = stage.find_timeline(&canon).map_or(0, |t| t.current_frame);
         let ev = stage.goto_frame(&canon, target_frame, play_after);
         let new_frame = stage
             .find_timeline(&canon)
@@ -1648,13 +1646,11 @@ impl Avm1 {
                 Op::End => break,
                 Op::NextFrame => {
                     let target_path = self.current_target();
-                    let next = stage
-                        .find_timeline(&target_path)
-                        .map_or(0, |t| {
-                            t.current_frame
-                                .saturating_add(1)
-                                .min(t.frame_count.saturating_sub(1))
-                        });
+                    let next = stage.find_timeline(&target_path).map_or(0, |t| {
+                        t.current_frame
+                            .saturating_add(1)
+                            .min(t.frame_count.saturating_sub(1))
+                    });
                     self.queue_goto_frame(stage, &target_path, next, true);
                 }
                 Op::PrevFrame => {
@@ -1713,9 +1709,8 @@ impl Avm1 {
                             }
                         }
                         Value::MovieClip(p) => {
-                            if let Some(f) = stage
-                                .find_timeline(&p)
-                                .and_then(|t| t.resolve_label(""))
+                            if let Some(f) =
+                                stage.find_timeline(&p).and_then(|t| t.resolve_label(""))
                             {
                                 self.queue_goto_frame(stage, &p, f, *play_after);
                             }
@@ -1980,8 +1975,7 @@ impl Avm1 {
                         && !url.to_ascii_lowercase().starts_with("fscommand:")
                         && !url.to_ascii_lowercase().starts_with("javascript:")
                     {
-                        self.load_movie_requests
-                            .push((url.clone(), target.clone()));
+                        self.load_movie_requests.push((url.clone(), target.clone()));
                     }
                 }
                 Op::GetUrl2 => {
@@ -2012,7 +2006,9 @@ impl Avm1 {
                 } => {
                     let wanted = if *stack_form {
                         match self.pop() {
-                            Value::Number(n) if n.is_finite() && n >= 1.0 => (n as u16).saturating_sub(1),
+                            Value::Number(n) if n.is_finite() && n >= 1.0 => {
+                                (n as u16).saturating_sub(1)
+                            }
                             Value::String(s) => stage
                                 .find_timeline(&self.current_target())
                                 .and_then(|t| t.resolve_label(&s))
@@ -2217,10 +2213,7 @@ impl Avm1 {
     ) -> Value {
         let norm = normalize_key(name, self.swf_version);
         if norm == "this" {
-            return this_obj.map_or_else(
-                || Value::MovieClip(self.current_target()),
-                Value::Object,
-            );
+            return this_obj.map_or_else(|| Value::MovieClip(self.current_target()), Value::Object);
         }
         if norm == "_root" || norm == "_level0" {
             return Value::MovieClip("_root".to_owned());
@@ -2242,12 +2235,11 @@ impl Avm1 {
         if let Some(child) = stage.resolve_child_clip(&target, name) {
             return Value::MovieClip(child);
         }
-        if matches!(norm.as_str(), "_currentframe" | "_totalframes" | "_framesloaded") {
-            return self.get_member_value(
-                &Value::MovieClip(target),
-                &norm,
-                stage,
-            );
+        if matches!(
+            norm.as_str(),
+            "_currentframe" | "_totalframes" | "_framesloaded"
+        ) {
+            return self.get_member_value(&Value::MovieClip(target), &norm, stage);
         }
         self.get_global(name)
     }
@@ -2272,18 +2264,12 @@ impl Avm1 {
                     "_target" => {
                         return Value::String(format!(
                             "/{}",
-                            canon
-                                .strip_prefix("_root.")
-                                .unwrap_or("")
-                                .replace('.', "/")
+                            canon.strip_prefix("_root.").unwrap_or("").replace('.', "/")
                         ));
                     }
                     "_name" => {
                         return Value::String(
-                            canon
-                                .rsplit_once('.')
-                                .map_or("", |(_, n)| n)
-                                .to_owned(),
+                            canon.rsplit_once('.').map_or("", |(_, n)| n).to_owned(),
                         );
                     }
                     "_currentframe" => {
@@ -2306,16 +2292,22 @@ impl Avm1 {
                         return Value::Bool(display.map_or(canon == "_root", |o| o.visible));
                     }
                     "_width" => {
-                        return Value::Number(stage.clip_bounds_stage_twips(&canon).map_or(
-                            f64::from(stage.width_px),
-                            |b| f64::from(b.x_max.saturating_sub(b.x_min)) / 20.0,
-                        ));
+                        return Value::Number(
+                            stage
+                                .clip_bounds_stage_twips(&canon)
+                                .map_or(f64::from(stage.width_px), |b| {
+                                    f64::from(b.x_max.saturating_sub(b.x_min)) / 20.0
+                                }),
+                        );
                     }
                     "_height" => {
-                        return Value::Number(stage.clip_bounds_stage_twips(&canon).map_or(
-                            f64::from(stage.height_px),
-                            |b| f64::from(b.y_max.saturating_sub(b.y_min)) / 20.0,
-                        ));
+                        return Value::Number(
+                            stage
+                                .clip_bounds_stage_twips(&canon)
+                                .map_or(f64::from(stage.height_px), |b| {
+                                    f64::from(b.y_max.saturating_sub(b.y_min)) / 20.0
+                                }),
+                        );
                     }
                     "_xmouse" => {
                         let origin = stage
@@ -2779,13 +2771,9 @@ impl Avm1 {
                 "getnexthighestdepth" => {
                     Value::Number(f64::from(stage.get_next_highest_depth(&canon)))
                 }
-                "getbytesloaded" | "getbytestotal" => {
-                    Value::Number(f64::from(stage.swf_byte_len))
-                }
+                "getbytesloaded" | "getbytestotal" => Value::Number(f64::from(stage.swf_byte_len)),
                 "hittest" => {
-                    let shape_flag = args
-                        .get(2)
-                        .map_or(false, |v| v.to_bool(self.swf_version));
+                    let shape_flag = args.get(2).map_or(false, |v| v.to_bool(self.swf_version));
                     match args.first() {
                         Some(Value::MovieClip(other)) => {
                             let other_canon = self.canonical_target(other);
@@ -2997,7 +2985,8 @@ impl Avm1 {
                                 ("bb", f64::from(cx.b_add)),
                                 ("ab", f64::from(cx.a_add)),
                             ] {
-                                self.heap.set_prop(out, k, Value::Number(v), self.swf_version);
+                                self.heap
+                                    .set_prop(out, k, Value::Number(v), self.swf_version);
                             }
                         }
                         Value::Object(out)
@@ -3040,9 +3029,9 @@ impl Avm1 {
                                 .first()
                                 .map_or(0.0, |v| v.to_number(self.swf_version))
                                 .max(0.0);
-                            let loops = args.get(1).map_or(1, |v| {
-                                v.to_i32(self.swf_version).clamp(1, 65535) as u16
-                            });
+                            let loops = args
+                                .get(1)
+                                .map_or(1, |v| v.to_i32(self.swf_version).clamp(1, 65535) as u16);
                             self.sound_starts.push((
                                 idn as u16,
                                 SoundInfo {
@@ -3199,7 +3188,8 @@ impl Avm1 {
                     Some(Value::String(s)) => Value::MovieClip(self.canonical_target(s)),
                     _ => Value::MovieClip(self.current_target()),
                 };
-                self.heap.set_prop(cid, "__target", target, self.swf_version);
+                self.heap
+                    .set_prop(cid, "__target", target, self.swf_version);
                 Value::Object(cid)
             }
             "string" => Value::String(args.first().map_or_else(String::new, |v| {

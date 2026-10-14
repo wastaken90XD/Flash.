@@ -1616,14 +1616,23 @@ impl Stage {
         let canon_parent = Self::resolve_target_path("_root", parent_path);
         let tl = self.find_timeline(&canon_parent)?;
         let obj = find_child_in_timeline(tl, child_name)?;
-        Some(child_clip_path(&canon_parent, obj.depth, obj.name.as_deref()))
+        Some(child_clip_path(
+            &canon_parent,
+            obj.depth,
+            obj.name.as_deref(),
+        ))
     }
 
     /// Returns the next available unused depth (`>= 0`) in the timeline at `target_path`.
     #[must_use]
     pub fn get_next_highest_depth(&self, target_path: &str) -> u16 {
         self.find_timeline(target_path)
-            .and_then(|tl| tl.display_list.keys().next_back().map(|d| d.saturating_add(1)))
+            .and_then(|tl| {
+                tl.display_list
+                    .keys()
+                    .next_back()
+                    .map(|d| d.saturating_add(1))
+            })
             .unwrap_or(1)
     }
 
@@ -2287,7 +2296,9 @@ fn update_buttons_recursive(
                 *changed = true;
             }
             if cond_mask != 0 {
-                events.button_transitions.push((obj_path.clone(), cond_mask));
+                events
+                    .button_transitions
+                    .push((obj_path.clone(), cond_mask));
                 for act in &btn.actions {
                     let matches = if btn.version == 1 {
                         (cond_mask & 0x0008) != 0
@@ -2329,9 +2340,7 @@ fn sync_variable_recursive(
     value: &str,
     changed: &mut bool,
 ) {
-    let rel_parent = parent_path
-        .strip_prefix("_root.")
-        .unwrap_or("");
+    let rel_parent = parent_path.strip_prefix("_root.").unwrap_or("");
     for (&depth, obj) in &mut tl.display_list {
         if let Some(Character::EditText(edit)) = dict.get(&obj.character_id) {
             let clean_var = edit
@@ -2530,8 +2539,17 @@ fn collect_flag_actions_recursive(
     }
 }
 
-type SavedInstanceMap =
-    BTreeMap<u16, (u16, Option<String>, ButtonState, bool, Option<Timeline>, bool)>;
+type SavedInstanceMap = BTreeMap<
+    u16,
+    (
+        u16,
+        Option<String>,
+        ButtonState,
+        bool,
+        Option<Timeline>,
+        bool,
+    ),
+>;
 
 fn save_display_list_state(tl: &Timeline) -> SavedInstanceMap {
     tl.display_list
@@ -2906,7 +2924,8 @@ fn apply_place_object2(
     // In-place move/modification when either `is_move && character_id.is_none()` OR
     // an instance with the same `character_id` already exists at `po2.depth` (tween keyframe).
     if let Some(existing) = tl.display_list.get_mut(&po2.depth) {
-        let same_char = po2.character_id.is_none() || po2.character_id == Some(existing.character_id);
+        let same_char =
+            po2.character_id.is_none() || po2.character_id == Some(existing.character_id);
         if po2.is_move && same_char {
             if let Some(m) = po2.matrix {
                 existing.matrix = m;

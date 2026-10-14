@@ -348,7 +348,8 @@ fn render_object(
             if let Some(flat) = ctx.flattened_shapes.get(&obj.character_id) {
                 render_flattened_shape(pixmap, flat, ctx.dict, xform, cx, mask);
             } else {
-                let flat = cache.get_or_insert_arc((obj.character_id, 0), || flatten_shape(shape_def));
+                let flat =
+                    cache.get_or_insert_arc((obj.character_id, 0), || flatten_shape(shape_def));
                 render_flattened_shape(pixmap, &flat, ctx.dict, xform, cx, mask);
             }
         }
