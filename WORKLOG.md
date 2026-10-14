@@ -66,3 +66,8 @@ Chronological log of tasks completed under **TSD Part 3 (`3.1`–`3.13`)**:
    - **Action 4.7.6:** Added idempotent `[question]` issue creation in `ci-report` asking the owner to decide on the `corpus-ext` job and the Ruffle `swf` test-only oracle, and continued without them.
    - **Action 4.7.7:** Reviewed `JesseTG/ruffle_libretro` public issues and commit history for input, audio, VFS, and `.info` pitfalls and documented them in `docs/KNOWN_LIMITATIONS.md` Section 12.
 
+10. **Owner Issue Reports (`#8`, `#9`, `#11`) & Artifact Updates:**
+    - **Issue #11 (`D-012`):** Per owner decision (`corpus-ext` = `No`, Ruffle `swf` test-only parser oracle = `Sure`), added `swf` to `deps-allow.txt` and `swf = "0.3.0"` under `[dev-dependencies]` in `crates/swfr-testkit/Cargo.toml`, and added `ruffle_swf_oracle_crosschecks_swfbuilder_tag_counts` in `crates/swfr-testkit/tests/tag_roundtrip.rs`.
+    - **Issues #8 & #9 (`V6` & `V7`):** Bundled `test-swfs/` (`v2_m2_vectors_and_bitmaps.swf` .. `v7_m6_release_candidate.swf` + `10frame_moving_square.swf`) directly into every platform zip in `release.yml` and `cross.yml` (including Windows `x86_64-pc-windows-msvc`), uploaded standalone `test-swfs` artifacts, upgraded `write_synthetic_test_swfs` (`build_interactive_showcase_swf`) with a 20-frame animated indicator, interactive `DefineButton2` (`Up`/`Over`/`Down` + click HUD update), and one-shot chime, and updated `ci-report` to replace the pre-Part-3.14 workflow run URLs in Issues #4–#9 with the latest post-Part-3.14 runs.
+
+
