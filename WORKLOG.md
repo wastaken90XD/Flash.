@@ -70,6 +70,12 @@ Chronological log of tasks completed under **TSD Part 3 (`3.1`–`3.13`)**:
     - **Issue #11 (`D-012`):** Per owner decision (`corpus-ext` = `No`, Ruffle `swf` test-only parser oracle = `Sure`), added `swf` to `deps-allow.txt` and `swf = "0.3.0"` under `[dev-dependencies]` in `crates/swfr-testkit/Cargo.toml`, and added `ruffle_swf_oracle_crosschecks_swfbuilder_tag_counts` in `crates/swfr-testkit/tests/tag_roundtrip.rs`.
     - **Issues #8 & #9 (`V6` & `V7`) and In-Branch `test-swfs/`:** Committed `test-swfs/` (`v2_m2_vectors_and_bitmaps.swf` .. `v7_m6_release_candidate.swf`, `10frame_moving_square.swf`, `1frame_red_rect_on_blue_stage.swf`, `test-swfs/real/*.swf`, and `test-swfs/README.md`) directly in the repository branch (`arena/a4bfe02a-flash`), kept synced via `lockfile.yml` (`swfr-harness dump-test-swfs test-swfs`), bundled `test-swfs/` into every platform zip in `release.yml` and `cross.yml`, and updated `ci-report` to replace the pre-Part-3.14 workflow run URLs in Issues #4–#9 with the latest post-Part-3.14 runs.
     - **RetroArch Input & Timeline Ergonomics:** Wired `Player::draw_software_cursor` into `CoreState::step_frame` whenever the mouse or joypad cursor moves, mapped RetroPad buttons (`D-Pad`, `B`, `A`, `Start`) and `retro_key` codes (`RETROK_UP/DOWN/LEFT/RIGHT`, `a..z`, `Shift`, `Ctrl`) to Adobe Flash `Key.*` virtual keycodes (`37..=40`, `32`, `13`, `65..=90`, `16..=17`), and preserved `EditText` / `Button` state across timeline seeks and loops.
+    - **Human-Test Follow-Up Fixes (`65c1ab4` / `4c6d3ee`):**
+      - Fixed software cursor trail on static 1-frame SWFs (`1frame_red_rect_on_blue_stage.swf`) by drawing the cursor reticle directly onto `Player.frame.xrgb` instead of mutating `Renderer.xrgb_buf`.
+      - Separated `'D'`, `'K'`, `'Y'`, `'N'`, `'V'`, and `'W'` in `builtin_char_path` (`crates/swfr-render/src/lib.rs`) so `"SWFR READY"`, `"BTN CLICKED"`, and `"KEY PRESSED"` render with distinct glyphs instead of `"SUFR REA0X"` / `"BTM CLICXE0"` / `"XEX PRESSE0"`.
+      - Added top header HUD (`"SWFR 60FPS"`, gold) and bottom status HUD (`"SWFR READY"`, mint green) with `font_id: Some(99)` (`360` twips height) in `build_interactive_showcase_swf()`.
+      - Updated `InputTracker` (`crates/swfr-libretro/src/input_map.rs`) so stationary post-click `pointer_x`/`pointer_y` values never snap the cursor back or require click-dragging, and so D-Pad / `B` cursor actions in `PadMode::Cursor` do not fire `onClipEvent(keyDown)`.
+
 
 
 
