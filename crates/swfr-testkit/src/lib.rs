@@ -1950,5 +1950,5 @@ pub fn encode_clip_actions(swf_version: u8, records: &[(u32, Vec<u8>)]) -> Vec<u
 /// Compresses raw pixel or payload bytes with Zlib (`miniz_oxide`).
 #[must_use]
 pub fn compress_zlib(raw: &[u8]) -> Vec<u8> {
-    compress_to_vec_zlib(raw, 6)
+    miniz_oxide::deflate::compress_to_vec_zlib(raw, 6)
 }
