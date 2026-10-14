@@ -2083,17 +2083,22 @@ fn e2e_real_world_flash8_placeobject3_definefunction2_preloader_and_sprite_movem
     init_abi_callbacks();
 
     let mut b = SwfBuilder::new(8, 120, 80, 30.0, 1);
-    b.push_tag(&Tag::SetBackgroundColor(Rgb::new(0, 0, 0)));
+    b.push_tag(&Tag::SetBackgroundColor { r: 0, g: 0, b: 0 });
 
     // Character 1: 20x20 red square
-    b.push_tag(&Tag::DefineShape(rect_shape_def(
-        1,
-        0,
-        0,
-        20 * 20,
-        20 * 20,
-        Rgba::rgb(255, 0, 0),
-    )));
+    b.push_tag(&Tag::DefineShape(ShapeDef {
+        id: 1,
+        version: 1,
+        bounds: Rect {
+            x_min: 0,
+            x_max: 20 * 20,
+            y_min: 0,
+            y_max: 20 * 20,
+        },
+        fill_styles: vec![FillStyle::Solid(Rgba::rgb(255, 0, 0))],
+        line_styles: Vec::new(),
+        records: rect_shape_records(0, 0, 20 * 20, 20 * 20),
+    }));
 
     // Character 2: Sprite with 2 frames (frame 1 traces "sp_f1", frame 2 traces "sp_f2" + stop)
     let mut sp_f1 = ActionBuilder::new();
@@ -2176,7 +2181,7 @@ fn e2e_real_world_flash8_placeobject3_definefunction2_preloader_and_sprite_movem
         .push_i32(1)
         .push_str("moveHero")
         .call_function()
-        .pop()
+        .op(0x17)
         .push_i32(0)
         .push_str("_root")
         .get_var()
