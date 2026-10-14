@@ -1032,14 +1032,7 @@ fn parse_tag_stream(
             offset: tag_offset,
             kind: ParseErrorKind::UnexpectedEof,
         })?;
-        let tag = match decode_tag(code, payload, swf_version, limits, tag_offset) {
-            Ok(t) => t,
-            Err(e) if matches!(e.kind, ParseErrorKind::LimitExceeded(_)) => return Err(e),
-            Err(_) => Tag::Unknown {
-                code,
-                raw: payload.to_vec(),
-            },
-        };
+        let tag = decode_tag(code, payload, swf_version, limits, tag_offset)?;
         let is_end = tag == Tag::End;
         tags.push(tag);
         if is_end {

@@ -598,6 +598,11 @@ jobs:
                       ["gh", "api", "-X", "POST", f"repos/{repo}/issues/11/comments", "-f", f"body={msg11}"],
                       check=False,
                   )
+              if all_pass:
+                  subprocess.run(
+                      ["gh", "api", "-X", "PATCH", f"repos/{repo}/issues/11", "-f", "state=closed"],
+                      check=False,
+                  )
           except Exception:
               pass
           PY
