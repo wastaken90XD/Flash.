@@ -4,6 +4,7 @@ fontdue
 lzma-rs
 miniz_oxide
 png
+swf
 symphonia
 tiny-skia
 zune-jpeg

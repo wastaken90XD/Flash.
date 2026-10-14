@@ -59,3 +59,9 @@
 - **Context:** TSD Part 4 (intro rule 5, 4.4, 4.6 items 3 & 4, and 4.7 items 4–6) notes that bitmap smoothing (`0x40`/`0x41`) only exists from SWF 8, Nellymoser/Speex should log a warning and play silence, and every conformance test's metadata must declare `expectation = "verified"` (from real Flash Player output) or `"derived"` (from ES3 reasoning) with counts shown in `ci-report`.
 - **Decision:** Gate bitmap bilinear filtering on `swf_version >= 8` in `Stage::register_definitions` (`crates/swfr-scene/src/lib.rs`); log a warning once per load when Nellymoser or Speex audio tags are encountered while outputting silence (`crates/swfr-player/src/lib.rs`); and annotate all 160 generated conformance cases in `crates/swfr-avm1/tests/conformance.rs` with `expectation = "derived"` (`verified = 0, derived = 160`) and report both counts in `ci-report`.
 
+## D-012: Owner Decision on Issue #11 — Omit `corpus-ext` and Enable Ruffle `swf` Test-Only Parser Oracle (TSD 4.4, 4.5, 4.7 item 6)
+- **Date:** 2026-10-14
+- **Context:** In [Issue #11](https://github.com/wastaken90XD/Flash./issues/11), the owner responded `No` to adding the `corpus-ext` CI job (TSD 4.4) and `Sure` to adding Ruffle's `swf` (`MIT OR Apache-2.0`) crate in `deps-allow.txt` strictly as a `[dev-dependencies]` test-only parser oracle (TSD 4.5).
+- **Decision:** Keep `corpus-ext` disabled, add `swf` to `deps-allow.txt` and `swf = "0.3.0"` under `[dev-dependencies]` in `crates/swfr-testkit/Cargo.toml`, and cross-check `SwfBuilder` headers and tag counts against `swf::decompress_swf` and `swf::parse_swf` in `ruffle_swf_oracle_crosschecks_swfbuilder_tag_counts` (`crates/swfr-testkit/tests/tag_roundtrip.rs`).
+
+

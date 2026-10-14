@@ -74,7 +74,7 @@ Every item below names the exact Rust `#[test]` function identifier(s) and passi
 3. **Physical Hardware Verification (`docs/platform-notes.md`):**
    - `docs/platform-notes.md` is marked `UNVERIFIED` pending owner testing of V1–V7 on physical Reference A/B/C hardware.
 4. **Optional `corpus-ext` CI Job & Ruffle `swf` Test Oracle (TSD 4.4, 4.5, 4.7 item 6):**
-   - Opened `[question]` [Issue #11](https://github.com/wastaken90XD/Flash./issues/11) asking the owner to decide on enabling `corpus-ext` and adding Ruffle's `swf` (`MIT OR Apache-2.0`) crate as a `[dev-dependencies]` test-only oracle.
+   - Per owner decision in [Issue #11](https://github.com/wastaken90XD/Flash./issues/11) (`corpus-ext` = `No`, Ruffle `swf` test-only oracle = `Sure`), `corpus-ext` remains disabled and `swf = "0.3.0"` is enabled under `[dev-dependencies]` in `crates/swfr-testkit/Cargo.toml` (`ruffle_swf_oracle_crosschecks_swfbuilder_tag_counts`).
 
 ---
 
@@ -87,6 +87,6 @@ Every item below names the exact Rust `#[test]` function identifier(s) and passi
 | **4.7.3** | M3: write event-order tests for item 10 (`load`, `unload`, button, mouse, key) and record the result in `DECISIONS.md` | `e2e_hard_area_event_order_load_unload_button_mouse_key_via_abi` (`crates/swfr-libretro/tests/e2e.rs`), [`DECISIONS.md` (`D-010`, `D-011`)](../blob/arena/a4bfe02a-flash/DECISIONS.md) | PASS |
 | **4.7.4** | M4: add `expectation = "verified"` or `"derived"` to every conformance test's meta, and show the counts (`verified = 0`, `derived = 160`) in `ci-report` | `avm1_es3_conformance_160_generated_movies` (`crates/swfr-avm1/tests/conformance.rs`), `.github/workflows/ci.yml` (`ci-report`) | PASS |
 | **4.7.5** | M1: add optional `ffdec-crosscheck` job (`continue-on-error: true`) when Java is available on the runner to compare tag sequences and report mismatches without failing the build | `.github/workflows/ci.yml` (`ffdec-crosscheck`) | PASS |
-| **4.7.6** | Open a `[question]` issue asking the owner to decide on the `corpus-ext` job and the Ruffle `swf` test oracle, and continue without them | [Issue #11](https://github.com/wastaken90XD/Flash./issues/11), `.github/workflows/ci.yml` (`ci-report`) | PASS |
+| **4.7.6** | Open a `[question]` issue asking the owner to decide on the `corpus-ext` job (`No`) and the Ruffle `swf` test oracle (`Sure`), and implement the approved `swf` `[dev-dependencies]` test-only oracle | [Issue #11](https://github.com/wastaken90XD/Flash./issues/11), `ruffle_swf_oracle_crosschecks_swfbuilder_tag_counts` (`crates/swfr-testkit/tests/tag_roundtrip.rs`), [`DECISIONS.md` (`D-012`)](../blob/arena/a4bfe02a-flash/DECISIONS.md) | PASS |
 | **4.7.7** | Check the public issues of `ruffle_libretro` for input, audio, and timing problems, and add relevant items to `docs/KNOWN_LIMITATIONS.md` | [`docs/KNOWN_LIMITATIONS.md` Section 12](../blob/arena/a4bfe02a-flash/docs/KNOWN_LIMITATIONS.md) | PASS |
 

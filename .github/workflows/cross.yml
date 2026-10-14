@@ -93,9 +93,7 @@ jobs:
           mkdir -p dist
           cp "${SO_PATH}" dist/swfr_libretro.so
           cp swfr_libretro.info README.md LICENSE-MIT LICENSE-APACHE THIRD_PARTY_LICENSES.md dist/
-          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
-            cargo run --release -p swfr-harness -- dump-test-swfs dist/test-swfs
-          fi
+          cargo run --release -p swfr-harness -- dump-test-swfs dist/test-swfs
           (cd dist && zip -r "../swfr-libretro-${{ matrix.target }}.zip" .)
 
       - name: Upload Linux core artifact
@@ -103,6 +101,13 @@ jobs:
         with:
           name: swfr-libretro-${{ matrix.target }}
           path: swfr-libretro-${{ matrix.target }}.zip
+
+      - name: Upload standalone test-swfs artifact
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: test-swfs
+          path: dist/test-swfs/*.swf
 
   cross-android:
     name: cross-android (${{ matrix.target }})
@@ -150,6 +155,7 @@ jobs:
           mkdir -p dist
           cp "${SO_PATH}" dist/swfr_libretro.so
           cp swfr_libretro.info README.md LICENSE-MIT LICENSE-APACHE THIRD_PARTY_LICENSES.md dist/
+          cargo run --release -p swfr-harness -- dump-test-swfs dist/test-swfs
           (cd dist && zip -r "../swfr-libretro-${{ matrix.target }}.zip" .)
 
       - name: Upload Android core artifact
@@ -198,6 +204,7 @@ jobs:
           mkdir -p dist
           cp "${DLL_PATH}" dist/swfr_libretro.dll
           cp swfr_libretro.info README.md LICENSE-MIT LICENSE-APACHE THIRD_PARTY_LICENSES.md dist/
+          cargo run --release -p swfr-harness -- dump-test-swfs dist/test-swfs
           (cd dist && zip -r "../swfr-libretro-${{ matrix.target }}.zip" .)
 
       - name: Upload Windows GNU core artifact
@@ -241,6 +248,7 @@ jobs:
           mkdir -p dist
           cp "${DLL_PATH}" dist/swfr_libretro.dll
           cp swfr_libretro.info README.md LICENSE-MIT LICENSE-APACHE THIRD_PARTY_LICENSES.md dist/
+          cargo run --release -p swfr-harness -- dump-test-swfs dist/test-swfs
           7z a -tzip "${RUNNER_TEMP}/swfr-libretro-${{ matrix.target }}.zip" ./dist/*
 
       - name: Upload Windows MSVC core artifact
@@ -297,6 +305,7 @@ jobs:
             cp "${STATIC_PATH}" dist/swfr_libretro_ios.a
           fi
           cp swfr_libretro.info README.md LICENSE-MIT LICENSE-APACHE THIRD_PARTY_LICENSES.md dist/
+          cargo run --release -p swfr-harness -- dump-test-swfs dist/test-swfs
           (cd dist && zip -r "../swfr-libretro-${{ matrix.target }}.zip" .)
 
       - name: Upload Apple core artifact

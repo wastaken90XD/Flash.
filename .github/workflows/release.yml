@@ -109,6 +109,7 @@ jobs:
             cp "target/${{ matrix.target }}/release/libswfr_libretro.so" dist/swfr_libretro.so
           fi
           cp swfr_libretro.info README.md LICENSE-MIT LICENSE-APACHE THIRD_PARTY_LICENSES.md dist/
+          cargo run --release -p swfr-harness -- dump-test-swfs dist/test-swfs
           (cd dist && zip -r "../swfr-libretro-${{ matrix.target }}.zip" .)
 
       - name: Upload release zip artifact
@@ -116,6 +117,13 @@ jobs:
         with:
           name: release-${{ matrix.target }}
           path: swfr-libretro-${{ matrix.target }}.zip
+
+      - name: Upload standalone test-swfs artifact
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: test-swfs
+          path: dist/test-swfs/*.swf
 
   package-windows-msvc:
     name: package (${{ matrix.target }})
@@ -143,6 +151,7 @@ jobs:
           mkdir -p dist
           cp "target/${{ matrix.target }}/release/swfr_libretro.dll" dist/swfr_libretro.dll
           cp swfr_libretro.info README.md LICENSE-MIT LICENSE-APACHE THIRD_PARTY_LICENSES.md dist/
+          cargo run --release -p swfr-harness -- dump-test-swfs dist/test-swfs
           7z a -tzip "${RUNNER_TEMP}/swfr-libretro-${{ matrix.target }}.zip" ./dist/*
 
       - name: Upload Windows MSVC release zip
@@ -185,6 +194,7 @@ jobs:
             cp "target/${{ matrix.target }}/release/libswfr_libretro.a" dist/swfr_libretro_ios.a
           fi
           cp swfr_libretro.info README.md LICENSE-MIT LICENSE-APACHE THIRD_PARTY_LICENSES.md dist/
+          cargo run --release -p swfr-harness -- dump-test-swfs dist/test-swfs
           (cd dist && zip -r "../swfr-libretro-${{ matrix.target }}.zip" .)
 
       - name: Upload Apple release zip

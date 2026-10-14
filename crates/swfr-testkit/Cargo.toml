@@ -12,5 +12,8 @@ png.workspace = true
 swfr-reader.workspace = true
 swfr-swf.workspace = true
 
+[dev-dependencies]
+swf = "0.3.0"
+
 [lints]
 workspace = true

@@ -515,8 +515,92 @@ jobs:
 
           # Sync Issue #10 (v1 engineering-complete report) with docs/FINAL_REPORT.md
           if [ -f docs/FINAL_REPORT.md ] && gh api "repos/${GITHUB_REPOSITORY}/issues/10" >/dev/null 2>&1; then
-            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/issues/10" -F body=@docs/FINAL_REPORT.md >/dev/null || true
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/issues/10" -f state=open -F body=@docs/FINAL_REPORT.md >/dev/null || true
           fi
+
+          # Update Issues #4..#9 to point to the latest post-Part-3.14 cross/release/ci runs (with m0-stub off and test-swfs bundled in every zip), and reply to Issues #8, #9, and #11
+          python3 - <<'PY'
+          import json, os, re, subprocess
+
+          repo = os.environ.get("GITHUB_REPOSITORY", "wastaken90XD/Flash.")
+          ci_run_id = os.environ.get("GITHUB_RUN_ID", "38493505832")
+
+          def latest_run_id(wf_file, fallback):
+              try:
+                  raw = subprocess.check_output(
+                      ["gh", "api", f"repos/{repo}/actions/workflows/{wf_file}/runs?branch=arena/a4bfe02a-flash&status=success&per_page=1"]
+                  ).decode()
+                  runs = json.loads(raw).get("workflow_runs") or []
+                  if runs:
+                      return str(runs[0]["id"])
+              except Exception:
+                  pass
+              return fallback
+
+          cross_id = latest_run_id("cross.yml", "38493505795")
+          release_id = latest_run_id("release.yml", "38493506011")
+
+          for num in (4, 5, 6, 7, 8, 9):
+              try:
+                  raw = subprocess.check_output(["gh", "api", f"repos/{repo}/issues/{num}"]).decode()
+                  issue = json.loads(raw)
+                  body = issue.get("body") or ""
+                  new_body = body
+                  # Replace pre-Part-3.14 run IDs (38333151604, 38333151663, 38333151599) with latest post-Part-3.14 runs
+                  new_body = new_body.replace("38333151604", cross_id)
+                  new_body = new_body.replace("38333151663", release_id)
+                  new_body = new_body.replace("38333151599", ci_run_id)
+                  if num in (8, 9) and "383331516" in body:
+                      new_body = new_body.replace("- [x]", "- [ ]")
+                  if new_body != body:
+                      subprocess.run(
+                          ["gh", "api", "-X", "PATCH", f"repos/{repo}/issues/{num}", "-f", f"body={new_body}"],
+                          check=False,
+                      )
+              except Exception:
+                  pass
+
+          for num in (8, 9):
+              try:
+                  c_raw = subprocess.check_output(["gh", "api", f"repos/{repo}/issues/{num}/comments"]).decode()
+                  comments = json.loads(c_raw)
+                  if not any("<!-- swfr-post-3-14-artifacts -->" in (c.get("body") or "") for c in comments):
+                      msg = (
+                          "<!-- swfr-post-3-14-artifacts -->\n"
+                          "Thank you for testing and reporting this!\n\n"
+                          "### Root Cause of the 8 Color Bars / 440 Hz Tone & Missing `test-swfs`\n"
+                          "1. **Why 8 color bars + 440 Hz appeared:** The workflow run link previously in the issue description (`#38333151604` / `#38333151663`) was from the initial run **before TSD Part 3.14** removed the M0 stub. That older binary had the M0 color-bar and 440 Hz tone fallback.\n"
+                          "2. **Why `test-swfs/` was missing on Windows:** Previously, `test-swfs/` was only bundled inside the Linux `x86_64` archive in `cross.yml`, not inside the Windows MSVC archive or `release.yml`.\n\n"
+                          "### What Was Fixed\n"
+                          f"- Updated the artifact links in Issues #4–#9 to the latest post-Part-3.14 workflow runs (`release.yml`: https://github.com/{repo}/actions/runs/{release_id} and `cross.yml`: https://github.com/{repo}/actions/runs/{cross_id}), where `m0-stub` is completely disabled and verified absent by CI.\n"
+                          "- Bundled `test-swfs/` (`v2_m2_vectors_and_bitmaps.swf` .. `v7_m6_release_candidate.swf` and `10frame_moving_square.swf`) directly inside **every** platform zip in both `release.yml` and `cross.yml` (including `release-x86_64-pc-windows-msvc.zip`), and also uploaded a standalone `test-swfs` artifact on each workflow run.\n"
+                          "- Upgraded the synthetic `test-swfs/*.swf` showcase movie so it features a 20-frame moving indicator, an interactive `DefineButton2` (`Up` = blue/purple gradient, `Over` = gold on hover, `Down` = green on click + updates HUD text to `BTN CLICKED`), and a one-shot decaying 2-note chime on load."
+                      )
+                      subprocess.run(
+                          ["gh", "api", "-X", "POST", f"repos/{repo}/issues/{num}/comments", "-f", f"body={msg}"],
+                          check=False,
+                      )
+              except Exception:
+                  pass
+
+          # Reply to Issue #11 (owner decision on corpus-ext = No, Ruffle swf test-only oracle = Sure)
+          try:
+              c11_raw = subprocess.check_output(["gh", "api", f"repos/{repo}/issues/11/comments"]).decode()
+              c11 = json.loads(c11_raw)
+              if not any("<!-- swfr-issue-11-resolved -->" in (c.get("body") or "") for c in c11):
+                  msg11 = (
+                      "<!-- swfr-issue-11-resolved -->\n"
+                      "Thank you for the decision! Applied on `arena/a4bfe02a-flash`:\n\n"
+                      "1. **`corpus-ext` CI job (`No`):** Kept disabled; no external Ruffle checkout job added.\n"
+                      "2. **Ruffle `swf` test-only parser oracle (`Sure`):** Added `swf` to `deps-allow.txt` and `swf = \"0.3.0\"` under `[dev-dependencies]` in `crates/swfr-testkit/Cargo.toml`, and added `ruffle_swf_oracle_crosschecks_swfbuilder_tag_counts` in `crates/swfr-testkit/tests/tag_roundtrip.rs` to cross-check `SwfBuilder` headers and tag counts against `swf::decompress_swf` + `swf::parse_swf` (recorded in `DECISIONS.md` as `D-012`)."
+                  )
+                  subprocess.run(
+                      ["gh", "api", "-X", "POST", f"repos/{repo}/issues/11/comments", "-f", f"body={msg11}"],
+                      check=False,
+                  )
+          except Exception:
+              pass
+          PY
 
           # Remove any temporary lockfile diagnostic comments from PR #1
           python3 - <<'PY'

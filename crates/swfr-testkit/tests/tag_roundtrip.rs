@@ -645,3 +645,107 @@ fn mutator_100k_iterations_never_panics() {
         let _ = Movie::parse(&mutated);
     }
 }
+
+#[test]
+fn ruffle_swf_oracle_crosschecks_swfbuilder_tag_counts() {
+    let tags = [
+        Tag::SetBackgroundColor {
+            r: 0x10,
+            g: 0x20,
+            b: 0x30,
+        },
+        Tag::FrameLabel {
+            name: "intro".to_owned(),
+            is_anchor: false,
+        },
+        Tag::DefineShape(ShapeDef {
+            id: 1,
+            version: 1,
+            bounds: Rect {
+                x_min: 0,
+                x_max: 2000,
+                y_min: 0,
+                y_max: 2000,
+            },
+            fill_styles: vec![FillStyle::Solid(Rgba::rgb(255, 0, 0))],
+            line_styles: Vec::new(),
+            records: vec![
+                ShapeRecord::StyleChange {
+                    move_to: Some((0, 0)),
+                    fill_style_0: None,
+                    fill_style_1: Some(1),
+                    line_style: None,
+                    new_fill_styles: None,
+                    new_line_styles: None,
+                },
+                ShapeRecord::StraightEdge {
+                    dx_twips: 2000,
+                    dy_twips: 0,
+                },
+                ShapeRecord::StraightEdge {
+                    dx_twips: 0,
+                    dy_twips: 2000,
+                },
+                ShapeRecord::StraightEdge {
+                    dx_twips: -2000,
+                    dy_twips: 0,
+                },
+                ShapeRecord::StraightEdge {
+                    dx_twips: 0,
+                    dy_twips: -2000,
+                },
+            ],
+        }),
+        Tag::PlaceObject2(PlaceObject2Tag {
+            is_move: false,
+            depth: 1,
+            character_id: Some(1),
+            matrix: Some(Matrix::IDENTITY),
+            color_transform: None,
+            ratio: None,
+            name: Some("box".to_owned()),
+            clip_depth: None,
+            clip_actions_raw: None,
+        }),
+        Tag::DoAction {
+            actions: vec![0x07, 0x00],
+        },
+        Tag::ShowFrame,
+        Tag::RemoveObject2 { depth: 1 },
+        Tag::ShowFrame,
+        Tag::End,
+    ];
+
+    for comp in [
+        Compression::Uncompressed,
+        Compression::Zlib,
+        Compression::Lzma,
+    ] {
+        let mut builder = SwfBuilder::new(13, 320, 240, 30.0, 2).with_compression(comp);
+        for t in &tags {
+            builder.push_tag(t);
+        }
+        let bytes = builder.build();
+
+        let our_movie = Movie::parse(&bytes).expect("swfr_swf Movie::parse must succeed");
+        let ruffle_buf =
+            swf::decompress_swf(&bytes[..]).expect("Ruffle swf::decompress_swf must succeed");
+        let ruffle_movie =
+            swf::parse_swf(&ruffle_buf).expect("Ruffle swf::parse_swf must succeed");
+
+        assert_eq!(ruffle_movie.header.version(), our_movie.header.version);
+        assert_eq!(
+            ruffle_movie.header.num_frames(),
+            our_movie.header.frame_count
+        );
+        // Ruffle's `read_tag_list()` omits the terminal `End` (0) tag and folds `SetBackgroundColor`
+        // into the extended header if it appears in the first two tags while also keeping it in `tags`.
+        let our_non_end_count = our_movie
+            .tags
+            .iter()
+            .filter(|t| !matches!(t, Tag::End))
+            .count();
+        assert_eq!(ruffle_movie.tags.len(), our_non_end_count);
+    }
+}
+

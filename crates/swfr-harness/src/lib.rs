@@ -472,6 +472,322 @@ pub fn run_benchmark_suite() -> String {
     )
 }
 
+/// Builds a 20-frame interactive showcase SWF with:
+/// - A 320x240 dark-slate stage at 30 fps
+/// - An animated cyan indicator bar moving smoothly across frames 2..=20 (looping back to frame 2)
+/// - An interactive `DefineButton2` in the center (`Up` = blue/purple gradient, `Over` = gold, `Down` = green)
+///   whose click action updates the dynamic `DefineEditText` HUD (`"SWFR READY"` -> `"BTN CLICKED"`)
+/// - A one-shot decaying chime sound played only on Frame 1
+#[must_use]
+#[allow(clippy::arithmetic_side_effects, clippy::too_many_lines)]
+pub fn build_interactive_showcase_swf() -> Vec<u8> {
+    let mut b = SwfBuilder::new(8, 320, 240, 30.0, 20);
+    b.push_tag(&Tag::SetBackgroundColor {
+        r: 0x14,
+        g: 0x1A,
+        b: 0x26,
+    });
+
+    let rect_records = |x: i32, y: i32, w: i32, h: i32| -> Vec<ShapeRecord> {
+        vec![
+            ShapeRecord::StyleChange {
+                move_to: Some((x, y)),
+                fill_style_0: None,
+                fill_style_1: Some(1),
+                line_style: Some(1),
+                new_fill_styles: None,
+                new_line_styles: None,
+            },
+            ShapeRecord::StraightEdge {
+                dx_twips: w,
+                dy_twips: 0,
+            },
+            ShapeRecord::StraightEdge {
+                dx_twips: 0,
+                dy_twips: h,
+            },
+            ShapeRecord::StraightEdge {
+                dx_twips: -w,
+                dy_twips: 0,
+            },
+            ShapeRecord::StraightEdge {
+                dx_twips: 0,
+                dy_twips: -h,
+            },
+        ]
+    };
+
+    let btn_bounds = Rect {
+        x_min: 1200,
+        x_max: 5200,
+        y_min: 1800,
+        y_max: 3800,
+    };
+
+    // Character 1: Button Up shape (blue-purple linear gradient)
+    b.push_tag(&Tag::DefineShape(ShapeDef {
+        id: 1,
+        version: 3,
+        bounds: btn_bounds,
+        fill_styles: vec![FillStyle::LinearGradient {
+            matrix: Matrix {
+                scale_x_fp16: 8000,
+                scale_y_fp16: 8000,
+                rotate_skew0_fp16: 0,
+                rotate_skew1_fp16: 0,
+                translate_x_twips: 3200,
+                translate_y_twips: 2800,
+            },
+            stops: vec![
+                GradientStop {
+                    ratio: 0,
+                    color: Rgba::rgb(0x20, 0x80, 0xFF),
+                },
+                GradientStop {
+                    ratio: 255,
+                    color: Rgba::rgb(0x80, 0x20, 0xFF),
+                },
+            ],
+        }],
+        line_styles: vec![LineStyle {
+            width_twips: 40,
+            color: Rgba::rgb(0xFF, 0xFF, 0xFF),
+        }],
+        records: rect_records(1200, 1800, 4000, 2000),
+    }));
+
+    // Character 5: Button Over shape (gold highlight when pointer hovers)
+    b.push_tag(&Tag::DefineShape(ShapeDef {
+        id: 5,
+        version: 3,
+        bounds: btn_bounds,
+        fill_styles: vec![FillStyle::Solid(Rgba::rgb(0xFF, 0xB8, 0x20))],
+        line_styles: vec![LineStyle {
+            width_twips: 40,
+            color: Rgba::rgb(0xFF, 0xFF, 0xFF),
+        }],
+        records: rect_records(1200, 1800, 4000, 2000),
+    }));
+
+    // Character 6: Button Down shape (emerald green when clicked)
+    b.push_tag(&Tag::DefineShape(ShapeDef {
+        id: 6,
+        version: 3,
+        bounds: btn_bounds,
+        fill_styles: vec![FillStyle::Solid(Rgba::rgb(0x20, 0xE0, 0x60))],
+        line_styles: vec![LineStyle {
+            width_twips: 40,
+            color: Rgba::rgb(0xFF, 0xFF, 0xFF),
+        }],
+        records: rect_records(1200, 1800, 4000, 2000),
+    }));
+
+    // Character 7: Animated cyan indicator square (24x12 px)
+    b.push_tag(&Tag::DefineShape(ShapeDef {
+        id: 7,
+        version: 3,
+        bounds: Rect {
+            x_min: 0,
+            x_max: 480,
+            y_min: 0,
+            y_max: 240,
+        },
+        fill_styles: vec![FillStyle::Solid(Rgba::rgb(0x00, 0xE8, 0xFF))],
+        line_styles: vec![LineStyle {
+            width_twips: 20,
+            color: Rgba::rgb(0xFF, 0xFF, 0xFF),
+        }],
+        records: rect_records(0, 0, 480, 240),
+    }));
+
+    // Character 2: Dynamic EditText HUD at top of stage
+    b.push_tag(&Tag::DefineEditText(EditTextDef {
+        id: 2,
+        bounds: Rect {
+            x_min: 600,
+            x_max: 5800,
+            y_min: 200,
+            y_max: 1100,
+        },
+        font_id: None,
+        font_height_twips: 440,
+        color: Rgba::rgb(0x40, 0xFF, 0x90),
+        variable_name: "hud".to_owned(),
+        initial_text: Some("SWFR READY".to_owned()),
+        word_wrap: false,
+        multiline: false,
+        read_only: true,
+        html: false,
+        use_outlines: false,
+    }));
+
+    // Character 3: Interactive DefineButton2 with Up/Over/Down visual states and click action
+    let mut click_ab = ActionBuilder::new();
+    click_ab
+        .push_str("hud")
+        .push_str("BTN CLICKED")
+        .set_var()
+        .push_str("button_clicked")
+        .trace();
+    let click_bytes = click_ab.build();
+    b.push_tag(&Tag::DefineButton(ButtonDef {
+        id: 3,
+        version: 2,
+        track_as_menu: false,
+        records: vec![
+            ButtonRecord {
+                state_hit_test: true,
+                state_down: false,
+                state_over: false,
+                state_up: true,
+                character_id: 1,
+                depth: 1,
+                matrix: Matrix::IDENTITY,
+                color_transform: ColorTransform::IDENTITY,
+            },
+            ButtonRecord {
+                state_hit_test: false,
+                state_down: false,
+                state_over: true,
+                state_up: false,
+                character_id: 5,
+                depth: 1,
+                matrix: Matrix::IDENTITY,
+                color_transform: ColorTransform::IDENTITY,
+            },
+            ButtonRecord {
+                state_hit_test: false,
+                state_down: true,
+                state_over: false,
+                state_up: false,
+                character_id: 6,
+                depth: 1,
+                matrix: Matrix::IDENTITY,
+                color_transform: ColorTransform::IDENTITY,
+            },
+        ],
+        actions: vec![
+            ButtonAction {
+                condition: 0x0004, // OverUpToOverDown
+                actions: click_bytes.clone(),
+            },
+            ButtonAction {
+                condition: 0x0008, // OverDownToOverUp
+                actions: click_bytes,
+            },
+        ],
+    }));
+
+    // Character 4: Short decaying two-note arpeggio chime (8820 samples = 0.20s at 44.1 kHz)
+    let total_samples = 8820_usize;
+    let mut pcm = Vec::with_capacity(total_samples * 2);
+    for i in 0..total_samples {
+        let freq = if i < total_samples / 2 {
+            523.25_f64
+        } else {
+            659.25_f64
+        };
+        let env = 1.0 - (i as f64 / total_samples as f64);
+        let phase = (i as f64) * core::f64::consts::TAU * freq / 44_100.0;
+        let sample = (phase.sin() * env * 6000.0) as i16;
+        pcm.extend_from_slice(&sample.to_le_bytes());
+    }
+    b.push_tag(&Tag::DefineSound(SoundDef {
+        id: 4,
+        format: AudioFormat::PcmLittleEndian,
+        sample_rate_code: 3,
+        is_16bit: true,
+        is_stereo: false,
+        sample_count: total_samples as u32,
+        data: pcm,
+    }));
+
+    // Frame 1: Place interactive Button (depth 1), HUD EditText (depth 2), and moving indicator (depth 3)
+    b.push_tag(&Tag::PlaceObject2(PlaceObject2Tag {
+        is_move: false,
+        depth: 1,
+        character_id: Some(3),
+        matrix: Some(Matrix::IDENTITY),
+        color_transform: None,
+        ratio: None,
+        name: None,
+        clip_depth: None,
+        clip_actions_raw: None,
+    }));
+    b.push_tag(&Tag::PlaceObject2(PlaceObject2Tag {
+        is_move: false,
+        depth: 2,
+        character_id: Some(2),
+        matrix: Some(Matrix::IDENTITY),
+        color_transform: None,
+        ratio: None,
+        name: None,
+        clip_depth: None,
+        clip_actions_raw: None,
+    }));
+    b.push_tag(&Tag::PlaceObject2(PlaceObject2Tag {
+        is_move: false,
+        depth: 3,
+        character_id: Some(7),
+        matrix: Some(Matrix {
+            translate_x_twips: 600,
+            translate_y_twips: 1300,
+            ..Matrix::IDENTITY
+        }),
+        color_transform: None,
+        ratio: None,
+        name: None,
+        clip_depth: None,
+        clip_actions_raw: None,
+    }));
+    let mut ab_init = ActionBuilder::new();
+    ab_init.push_str("hud").push_str("SWFR READY").set_var();
+    b.push_tag(&Tag::DoAction {
+        actions: ab_init.build(),
+    });
+    b.push_tag(&Tag::StartSound {
+        sound_id: 4,
+        sound_info: SoundInfo {
+            sync_stop: false,
+            sync_no_multiple: true,
+            in_point: None,
+            out_point: None,
+            loop_count: Some(1),
+            envelope: Vec::new(),
+        },
+    });
+    b.push_tag(&Tag::ShowFrame);
+
+    // Frames 2..=20: Move indicator across stage and loop back to Frame 2 (index 1) so Frame 1 sound plays only once
+    for f in 1..20_i32 {
+        b.push_tag(&Tag::PlaceObject2(PlaceObject2Tag {
+            is_move: true,
+            depth: 3,
+            character_id: None,
+            matrix: Some(Matrix {
+                translate_x_twips: 600 + f * 240,
+                translate_y_twips: 1300,
+                ..Matrix::IDENTITY
+            }),
+            color_transform: None,
+            ratio: None,
+            name: None,
+            clip_depth: None,
+            clip_actions_raw: None,
+        }));
+        if f == 19 {
+            let mut ab_loop = ActionBuilder::new();
+            ab_loop.goto_frame(1).play();
+            b.push_tag(&Tag::DoAction {
+                actions: ab_loop.build(),
+            });
+        }
+        b.push_tag(&Tag::ShowFrame);
+    }
+
+    b.build()
+}
+
 /// Writes synthetic verification `.swf` movies into `out_dir` for CI artifacts and `human-test` issues V2–V7.
 ///
 /// # Errors
@@ -479,7 +795,7 @@ pub fn run_benchmark_suite() -> String {
 /// Returns an error string if directory creation or file writing fails.
 pub fn write_synthetic_test_swfs(out_dir: &Path) -> Result<(), String> {
     fs::create_dir_all(out_dir).map_err(|e| e.to_string())?;
-    let demo = build_benchmark_swf();
+    let demo = build_interactive_showcase_swf();
     for name in [
         "v2_m2_vectors_and_bitmaps.swf",
         "v3_m3_timeline_and_buttons.swf",
@@ -490,6 +806,8 @@ pub fn write_synthetic_test_swfs(out_dir: &Path) -> Result<(), String> {
     ] {
         fs::write(out_dir.join(name), &demo).map_err(|e| e.to_string())?;
     }
+    let moving_sq = build_moving_square_10frame_swf();
+    fs::write(out_dir.join("10frame_moving_square.swf"), &moving_sq).map_err(|e| e.to_string())?;
     Ok(())
 }
 
