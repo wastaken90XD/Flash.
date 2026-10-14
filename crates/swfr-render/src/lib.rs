@@ -19,8 +19,8 @@ use swfr_swf::{
 };
 use tiny_skia::{
     Color, FillRule, FilterQuality, GradientStop as SkiaStop, LineCap, LineJoin, LinearGradient,
-    Mask, Paint, Path, PathBuilder, Pattern, Pixmap, PixmapRef, Point, RadialGradient, SpreadMode,
-    Stroke, Transform,
+    Mask, Paint, Path, PathBuilder, Pattern, Pixmap, Point, RadialGradient, SpreadMode, Stroke,
+    Transform,
 };
 
 /// Maximum entries in the flattened-shape LRU cache (TSD 2.12 M2 Task 3).
@@ -60,11 +60,12 @@ struct LruEntry {
 }
 
 /// Bounded LRU cache mapping `(character_id, ratio)` to [`FlattenedShape`] and pre-built `tiny_skia` paths,
-/// plus cached font glyph paths.
+/// plus cached font glyph paths and identity-transform bitmap pixmaps.
 #[derive(Debug, Clone, Default)]
 pub struct ShapeCache {
     entries: Vec<LruEntry>,
     glyph_paths: BTreeMap<(u16, u32), Rc<Vec<Path>>>,
+    bitmap_pixmaps: BTreeMap<u16, Pixmap>,
     clock: u64,
 }
 
@@ -75,6 +76,7 @@ impl ShapeCache {
         Self {
             entries: Vec::new(),
             glyph_paths: BTreeMap::new(),
+            bitmap_pixmaps: BTreeMap::new(),
             clock: 0,
         }
     }
@@ -163,6 +165,18 @@ impl ShapeCache {
                 .insert((font_id, glyph_idx), Rc::clone(&rc));
         }
         rc
+    }
+
+    fn get_or_insert_bitmap(&mut self, bmp: &DecodedBitmap) -> Option<&Pixmap> {
+        if !self.bitmap_pixmaps.contains_key(&bmp.id) {
+            let pm = decoded_bitmap_to_pixmap(bmp, ColorTransform::IDENTITY)?;
+            if self.bitmap_pixmaps.len() < 1024 {
+                self.bitmap_pixmaps.insert(bmp.id, pm);
+            } else {
+                return None;
+            }
+        }
+        self.bitmap_pixmaps.get(&bmp.id)
     }
 }
 
@@ -406,16 +420,16 @@ fn render_object(
         Character::Shape(shape_def) => {
             let compiled =
                 cache.get_or_insert_compiled((obj.character_id, 0), || flatten_shape(shape_def));
-            render_compiled_shape(pixmap, &compiled, dict, xform, cx, mask);
+            render_compiled_shape(pixmap, cache, &compiled, dict, xform, cx, mask);
         }
         Character::MorphShape(morph_def) => {
             let compiled = cache.get_or_insert_compiled((obj.character_id, obj.ratio), || {
                 flatten_morph_shape(morph_def, obj.ratio)
             });
-            render_compiled_shape(pixmap, &compiled, dict, xform, cx, mask);
+            render_compiled_shape(pixmap, cache, &compiled, dict, xform, cx, mask);
         }
         Character::Bitmap(bmp) => {
-            render_bitmap_quad(pixmap, bmp, xform, cx, mask);
+            render_bitmap_quad(pixmap, cache, bmp, xform, cx, mask);
         }
         Character::Text(txt) => {
             render_static_text(pixmap, cache, txt, dict, xform, cx, mask);
@@ -442,6 +456,7 @@ fn render_object(
 
 fn render_compiled_shape(
     pixmap: &mut Pixmap,
+    cache: &mut ShapeCache,
     compiled: &CompiledShape,
     dict: &BTreeMap<u16, Character>,
     xform: Transform,
@@ -539,10 +554,9 @@ fn render_compiled_shape(
                     };
                     let pat_xform = matrix_to_skia(*matrix);
                     if cx == ColorTransform::IDENTITY {
-                        if let Some(pm_ref) =
-                            PixmapRef::from_bytes(&bmp.premultiplied_rgba, bmp.width, bmp.height)
-                        {
-                            let shader = Pattern::new(pm_ref, spread, quality, 1.0, pat_xform);
+                        if let Some(bmp_pm) = cache.get_or_insert_bitmap(bmp) {
+                            let shader =
+                                Pattern::new(bmp_pm.as_ref(), spread, quality, 1.0, pat_xform);
                             let paint = Paint {
                                 shader,
                                 anti_alias: true,
@@ -583,6 +597,7 @@ fn render_compiled_shape(
 
 fn render_bitmap_quad(
     pixmap: &mut Pixmap,
+    cache: &mut ShapeCache,
     bmp: &DecodedBitmap,
     xform: Transform,
     cx: ColorTransform,
@@ -600,10 +615,9 @@ fn render_bitmap_quad(
         return;
     };
     if cx == ColorTransform::IDENTITY {
-        if let Some(pm_ref) = PixmapRef::from_bytes(&bmp.premultiplied_rgba, bmp.width, bmp.height)
-        {
+        if let Some(bmp_pm) = cache.get_or_insert_bitmap(bmp) {
             let shader = Pattern::new(
-                pm_ref,
+                bmp_pm.as_ref(),
                 SpreadMode::Pad,
                 FilterQuality::Bilinear,
                 1.0,

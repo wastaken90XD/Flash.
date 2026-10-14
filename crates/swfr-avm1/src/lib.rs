@@ -2609,25 +2609,11 @@ impl Avm1 {
             }
             "gotoandstop" | "gotoandplay" => {
                 let cur_path = self.current_clip_path.clone();
-                self.call_method_on(
-                    &Value::MovieClip(cur_path),
-                    &lower,
-                    args,
-                    stage,
-                    budget,
-                    0,
-                )
+                self.call_method_on(&Value::MovieClip(cur_path), &lower, args, stage, budget, 0)
             }
             "play" | "stop" | "nextframe" | "prevframe" => {
                 let cur_path = self.current_clip_path.clone();
-                self.call_method_on(
-                    &Value::MovieClip(cur_path),
-                    &lower,
-                    args,
-                    stage,
-                    budget,
-                    0,
-                )
+                self.call_method_on(&Value::MovieClip(cur_path), &lower, args, stage, budget, 0)
             }
             _ => {
                 let fval = locals
@@ -3063,7 +3049,8 @@ impl Avm1 {
     ) -> Option<Value> {
         let func = self.heap.get_function(fid)?.clone();
         let mut frame_locals = func.captured_scope;
-        let is_fn2 = func.register_count > 0 || func.preload_flags != 0 || !func.param_regs.is_empty();
+        let is_fn2 =
+            func.register_count > 0 || func.preload_flags != 0 || !func.param_regs.is_empty();
         let saved_regs = if is_fn2 {
             Some(self.registers.clone())
         } else {
@@ -3231,4 +3218,3 @@ fn property_index_to_name(idx: i32) -> &'static str {
         _ => "",
     }
 }
-

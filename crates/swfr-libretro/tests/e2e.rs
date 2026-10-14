@@ -2136,7 +2136,7 @@ fn e2e_real_world_flash8_placeobject3_definefunction2_preloader_and_sprite_movem
     po3.extend_from_slice(&2_u16.to_le_bytes()); // character_id = 2
     po3.push(0x00); // Matrix::IDENTITY (all 0 bits, byte-aligned)
     po3.extend_from_slice(b"hero\0"); // name = "hero"
-    // FilterList: count = 1, DropShadowFilter (id = 0, 23 bytes)
+                                      // FilterList: count = 1, DropShadowFilter (id = 0, 23 bytes)
     po3.push(1);
     po3.push(0);
     po3.extend_from_slice(&[0u8; 23]);
@@ -2218,4 +2218,3 @@ fn e2e_real_world_flash8_placeobject3_definefunction2_preloader_and_sprite_movem
     retro_unload_game();
     retro_deinit();
 }
-
