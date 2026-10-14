@@ -10,8 +10,10 @@
 )]
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 use swfr_reader::Reader;
 use swfr_scene::Stage;
+use swfr_swf::SoundInfo;
 
 /// Generational object handle into [`Heap`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -203,7 +205,7 @@ pub struct UserFunction {
     /// Parameter names.
     pub params: Vec<String>,
     /// Pre-decoded instructions for the function body.
-    pub ops: Vec<Op>,
+    pub ops: Arc<[Op]>,
     /// Captured scope variables at definition time.
     pub captured_scope: BTreeMap<String, Value>,
 }
@@ -519,6 +521,47 @@ fn normalize_key(key: &str, swf_version: u8) -> String {
     }
 }
 
+fn swf4_property_name(idx: i32) -> Option<&'static str> {
+    Some(match idx {
+        0 => "_x",
+        1 => "_y",
+        2 => "_xscale",
+        3 => "_yscale",
+        4 => "_currentframe",
+        5 => "_totalframes",
+        6 => "_alpha",
+        7 => "_visible",
+        8 => "_width",
+        9 => "_height",
+        10 => "_rotation",
+        11 => "_target",
+        12 => "_framesloaded",
+        13 => "_name",
+        14 => "_droptarget",
+        15 => "_url",
+        16 => "_highquality",
+        17 => "_focusrect",
+        18 => "_soundbuftime",
+        19 => "_quality",
+        20 => "_xmouse",
+        21 => "_ymouse",
+        _ => return None,
+    })
+}
+
+fn parent_clip_path(path: &str) -> String {
+    path.rsplit_once('.').map_or_else(
+        || "_root".to_owned(),
+        |(parent, _)| {
+            if parent.is_empty() {
+                "_root".to_owned()
+            } else {
+                parent.to_owned()
+            }
+        },
+    )
+}
+
 /// Pre-decoded AVM1 instruction with branch targets resolved to instruction indices (TSD 2.9).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Op {
@@ -576,6 +619,39 @@ pub enum Op {
     Trace,
     /// `ActionRandomNumber` (`0x30`).
     RandomNumber,
+    /// `ActionGetTime` (`0x34`).
+    GetTime,
+    /// `ActionCharToAscii` (`0x32`) / `ActionMBCharToAscii` (`0x36`).
+    CharToAscii,
+    /// `ActionAsciiToChar` (`0x33`) / `ActionMBAsciiToChar` (`0x37`).
+    AsciiToChar,
+    /// `ActionTargetPath` (`0x45`).
+    TargetPath,
+    /// `ActionGetURL` (`0x83`, SWF4 form with literal URL and target strings).
+    GetUrl {
+        /// URL string.
+        url: String,
+        /// Target window / level string.
+        target: String,
+    },
+    /// `ActionGetURL2` (`0x9A`, stack form).
+    GetUrl2,
+    /// `ActionSetTarget` (`0x8B`) / `ActionSetTarget2` (`0x1F`, stack form when `stack_form`).
+    SetTarget {
+        /// Literal target path (empty in stack form).
+        target: String,
+        /// Whether the target is popped from the stack.
+        stack_form: bool,
+    },
+    /// `ActionWaitForFrame` (`0x8A`) / `ActionWaitForFrame2` (`0x8D`, stack form when `stack_form`).
+    WaitForFrame {
+        /// Literal frame number (0-based) in the non-stack form.
+        frame: u16,
+        /// Number of following instructions to skip when the frame is not yet loaded.
+        skip: u8,
+        /// Whether the frame is popped from the stack.
+        stack_form: bool,
+    },
     /// `ActionCallFunction` (`0x3D`).
     CallFunction,
     /// `ActionReturn` (`0x3E`).
@@ -727,11 +803,18 @@ pub fn decode_ops(bytecode: &[u8]) -> Vec<Op> {
             0x18 => Op::ToInteger,
             0x1C => Op::GetVariable,
             0x1D => Op::SetVariable,
+            0x1F => Op::SetTarget {
+                target: String::new(),
+                stack_form: true,
+            },
             0x21 => Op::StringAdd,
             0x22 => Op::GetProperty,
             0x23 => Op::SetProperty,
             0x26 => Op::Trace,
             0x30 => Op::RandomNumber,
+            0x32 | 0x36 => Op::CharToAscii,
+            0x33 | 0x37 => Op::AsciiToChar,
+            0x34 => Op::GetTime,
             0x3A | 0x3B => Op::Delete,
             0x3C => Op::DefineLocal,
             0x3D => Op::CallFunction,
@@ -742,6 +825,7 @@ pub fn decode_ops(bytecode: &[u8]) -> Vec<Op> {
             0x42 => Op::InitArray,
             0x43 => Op::InitObject,
             0x44 => Op::TypeOf,
+            0x45 => Op::TargetPath,
             0x46 | 0x55 => Op::Enumerate,
             0x47 => Op::Add2,
             0x48 => Op::Less2,
@@ -765,6 +849,10 @@ pub fn decode_ops(bytecode: &[u8]) -> Vec<Op> {
             0x67 => Op::Greater,
             0x68 => Op::StringGreater,
             0x81 => Op::GotoFrame(pr.read_u16().unwrap_or(0)),
+            0x83 => Op::GetUrl {
+                url: pr.read_c_string().unwrap_or_default(),
+                target: pr.read_c_string().unwrap_or_default(),
+            },
             0x87 => Op::StoreRegister(pr.read_u8().unwrap_or(0)),
             0x88 => {
                 let count = usize::from(pr.read_u16().unwrap_or(0));
@@ -776,7 +864,21 @@ pub fn decode_ops(bytecode: &[u8]) -> Vec<Op> {
                 }
                 Op::ConstantPool(pool)
             }
+            0x8A => Op::WaitForFrame {
+                frame: pr.read_u16().unwrap_or(0),
+                skip: pr.read_u8().unwrap_or(0),
+                stack_form: false,
+            },
+            0x8B => Op::SetTarget {
+                target: pr.read_c_string().unwrap_or_default(),
+                stack_form: false,
+            },
             0x8C => Op::GotoLabel(pr.read_c_string().unwrap_or_default()),
+            0x8D => Op::WaitForFrame {
+                frame: 0,
+                skip: pr.read_u8().unwrap_or(0),
+                stack_form: true,
+            },
             0x96 => {
                 let mut items = Vec::new();
                 while !pr.is_eof() {
@@ -833,6 +935,7 @@ pub fn decode_ops(bytecode: &[u8]) -> Vec<Op> {
                 rel_offset = Some(off);
                 Op::If(0)
             }
+            0x9A => Op::GetUrl2,
             0x9F => {
                 let flags = pr.read_u8().unwrap_or(0);
                 Op::GotoFrame2((flags & 0x01) != 0)
@@ -979,7 +1082,15 @@ pub struct Avm1 {
     /// Pending `loadMovie(url, target)` requests queued during the frame (TSD M5.6).
     pub load_movie_requests: Vec<(String, String)>,
     /// Target-frame actions queued by `gotoAndStop` / `gotoAndPlay` during an action block (TSD 4.6 item 7).
-    pending_goto_actions: Vec<Vec<u8>>,
+    pending_goto_actions: Vec<(String, Vec<u8>)>,
+    /// Dynamic properties assigned to movie clips, keyed by canonical clip path.
+    clip_properties: BTreeMap<String, BTreeMap<String, Value>>,
+    /// Canonical target path of the action block currently executing.
+    current_target_path: String,
+    /// Bounded cache of decoded action blocks (real movies re-run the same frame/clip scripts every frame).
+    ops_cache: BTreeMap<Vec<u8>, Arc<[Op]>>,
+    /// Event sounds requested by `Sound.attachSound()` / `Sound.start()`.
+    pub sound_starts: Vec<(u16, SoundInfo)>,
 }
 
 /// Size in bytes of the libretro `RETRO_MEMORY_SAVE_RAM` buffer (`64 KiB`, TSD 2.5).
@@ -1044,6 +1155,10 @@ impl Avm1 {
             save_ram,
             load_movie_requests: Vec::new(),
             pending_goto_actions: Vec::new(),
+            clip_properties: BTreeMap::new(),
+            current_target_path: "_root".to_owned(),
+            ops_cache: BTreeMap::new(),
+            sound_starts: Vec::new(),
         };
         vm.init_builtins();
         vm
@@ -1333,24 +1448,122 @@ impl Avm1 {
         ((x >> 11) as f64) / ((1_u64 << 53) as f64)
     }
 
-    /// Decodes and executes an AVM1 bytecode slice against `stage` using the resolved `Vec<Op>` interpreter.
-    pub fn execute_bytecode(&mut self, bytecode: &[u8], stage: &mut Stage) {
-        let ops = decode_ops(bytecode);
-        self.execute_ops(&ops, stage);
+    fn cached_ops(&mut self, bytecode: &[u8]) -> Arc<[Op]> {
+        if let Some(ops) = self.ops_cache.get(bytecode) {
+            return Arc::clone(ops);
+        }
+        let ops: Arc<[Op]> = Arc::from(decode_ops(bytecode));
+        if self.ops_cache.len() >= 512 {
+            self.ops_cache.clear();
+        }
+        self.ops_cache.insert(bytecode.to_vec(), Arc::clone(&ops));
+        ops
     }
 
-    /// Executes a pre-decoded ` &[Op]` slice against `stage`.
+    fn current_target(&self) -> String {
+        if self.current_target_path.is_empty() {
+            "_root".to_owned()
+        } else {
+            self.current_target_path.clone()
+        }
+    }
+
+    fn canonical_target(&self, target: &str) -> String {
+        Stage::resolve_target_path(&self.current_target(), target)
+    }
+
+    fn clip_prop_get(&self, canon: &str, prop: &str) -> Option<Value> {
+        let norm = normalize_key(prop, self.swf_version);
+        self.clip_properties
+            .get(canon)
+            .and_then(|m| m.get(&norm).cloned())
+    }
+
+    fn clip_prop_set(&mut self, canon: &str, prop: &str, val: Value) {
+        let norm = normalize_key(prop, self.swf_version);
+        self.clip_properties
+            .entry(canon.to_owned())
+            .or_default()
+            .insert(norm, val);
+    }
+
+    fn split_path_variable(&self, name: &str) -> Option<(String, String)> {
+        if !name.contains(['.', '/', ':']) {
+            return None;
+        }
+        let normalized = name.replace(':', ".").replace('/', ".");
+        let (parent, last) = normalized.rsplit_once('.')?;
+        if parent.is_empty() || last.is_empty() {
+            return None;
+        }
+        let canon_parent = Stage::resolve_target_path(&self.current_target(), parent);
+        Some((canon_parent, last.to_owned()))
+    }
+
+    fn resolve_path_value(&self, name: &str, stage: &Stage) -> Option<Value> {
+        let whole = Stage::resolve_target_path(
+            &self.current_target(),
+            &name.replace(':', ".").replace('/', "."),
+        );
+        if stage.find_timeline(&whole).is_some() || stage.find_display_object(&whole).is_some() {
+            return Some(Value::MovieClip(whole));
+        }
+        let (parent, last) = self.split_path_variable(name)?;
+        let val = self.get_member_value(&Value::MovieClip(parent), &last, stage);
+        if matches!(val, Value::Undefined) {
+            None
+        } else {
+            Some(val)
+        }
+    }
+
+    fn set_path_variable(&mut self, name: &str, val: Value, stage: &mut Stage) -> bool {
+        let Some((parent, last)) = self.split_path_variable(name) else {
+            return false;
+        };
+        if stage.find_timeline(&parent).is_none() && stage.find_display_object(&parent).is_none() {
+            return false;
+        }
+        self.set_member_value(&Value::MovieClip(parent), &last, val, stage);
+        true
+    }
+
+    /// Decodes and executes an AVM1 bytecode slice against `stage` with `_root` as its target.
+    pub fn execute_bytecode(&mut self, bytecode: &[u8], stage: &mut Stage) {
+        self.execute_bytecode_for_target(bytecode, "_root", stage);
+    }
+
+    /// Decodes (cached) and executes an AVM1 bytecode slice as the timeline at `target_path`.
+    pub fn execute_bytecode_for_target(
+        &mut self,
+        bytecode: &[u8],
+        target_path: &str,
+        stage: &mut Stage,
+    ) {
+        let ops = self.cached_ops(bytecode);
+        self.execute_ops_for_target(&ops, target_path, stage);
+    }
+
+    /// Executes a pre-decoded ` &[Op]` slice against `stage` with `_root` as its target.
     pub fn execute_ops(&mut self, ops: &[Op], stage: &mut Stage) {
+        self.execute_ops_for_target(ops, "_root", stage);
+    }
+
+    /// Executes a pre-decoded ` &[Op]` slice as the timeline at `target_path`.
+    pub fn execute_ops_for_target(&mut self, ops: &[Op], target_path: &str, stage: &mut Stage) {
         self.watchdog_tripped = false;
+        let previous_target = self.current_target_path.clone();
+        self.current_target_path = Stage::resolve_target_path("_root", target_path);
         let mut budget = self.max_ops_per_run;
         let mut locals = BTreeMap::new();
         let _ = self.run_ops_inner(ops, None, &mut locals, stage, &mut budget, 0);
         let mut hops = 0_usize;
         while !self.pending_goto_actions.is_empty() && hops < 16 && !self.watchdog_tripped {
             hops += 1;
-            let batch: Vec<Vec<u8>> = core::mem::take(&mut self.pending_goto_actions);
-            for code in batch {
-                let target_ops = decode_ops(&code);
+            let batch: Vec<(String, Vec<u8>)> = core::mem::take(&mut self.pending_goto_actions);
+            for (target, code) in batch {
+                let target_ops = self.cached_ops(&code);
+                self.current_target_path = Stage::resolve_target_path("_root", &target);
                 let mut target_locals = BTreeMap::new();
                 let _ = self.run_ops_inner(
                     &target_ops,
@@ -1366,11 +1579,15 @@ impl Avm1 {
             }
         }
         self.pending_goto_actions.clear();
+        self.current_target_path = previous_target;
         if self.heap.allocations_since_gc > 256 {
             let mut roots: Vec<Value> = self.stack.clone();
             roots.extend(self.globals.values().cloned());
             roots.extend(self.registers.iter().cloned());
             roots.extend(self.shared_objects.values().copied().map(Value::Object));
+            for props in self.clip_properties.values() {
+                roots.extend(props.values().cloned());
+            }
             let _ = self.heap.collect_garbage(&roots);
         }
     }
@@ -1382,35 +1599,18 @@ impl Avm1 {
         target_frame: u16,
         play_after: bool,
     ) {
-        let prev_frame = if path.is_empty() || path == "_root" || path == "/" {
-            stage.root.current_frame
-        } else {
-            let clean = path.trim_start_matches("_root.").trim_start_matches('/');
-            stage
-                .root
-                .display_list
-                .values()
-                .find(|o| o.name.as_deref() == Some(clean))
-                .and_then(|o| o.sprite_timeline.as_ref().map(|t| t.current_frame))
-                .unwrap_or(0)
-        };
-        let ev = stage.goto_frame(path, target_frame, play_after);
-        let new_frame = if path.is_empty() || path == "_root" || path == "/" {
-            stage.root.current_frame
-        } else {
-            let clean = path.trim_start_matches("_root.").trim_start_matches('/');
-            stage
-                .root
-                .display_list
-                .values()
-                .find(|o| o.name.as_deref() == Some(clean))
-                .and_then(|o| o.sprite_timeline.as_ref().map(|t| t.current_frame))
-                .unwrap_or(prev_frame)
-        };
+        let canon = self.canonical_target(path);
+        let prev_frame = stage
+            .find_timeline(&canon)
+            .map_or(0, |t| t.current_frame);
+        let ev = stage.goto_frame(&canon, target_frame, play_after);
+        let new_frame = stage
+            .find_timeline(&canon)
+            .map_or(prev_frame, |t| t.current_frame);
         if new_frame != prev_frame {
-            for (_, act) in ev.actions {
+            for (act_path, act) in ev.actions {
                 if !act.is_empty() {
-                    self.pending_goto_actions.push(act);
+                    self.pending_goto_actions.push((act_path, act));
                 }
             }
         }
@@ -1447,48 +1647,77 @@ impl Avm1 {
             match op {
                 Op::End => break,
                 Op::NextFrame => {
+                    let target_path = self.current_target();
                     let next = stage
-                        .root
-                        .current_frame
-                        .saturating_add(1)
-                        .min(stage.root.frame_count.saturating_sub(1));
-                    self.queue_goto_frame(stage, "_root", next, false);
+                        .find_timeline(&target_path)
+                        .map_or(0, |t| {
+                            t.current_frame
+                                .saturating_add(1)
+                                .min(t.frame_count.saturating_sub(1))
+                        });
+                    self.queue_goto_frame(stage, &target_path, next, true);
                 }
                 Op::PrevFrame => {
-                    let prev = stage.root.current_frame.saturating_sub(1);
-                    self.queue_goto_frame(stage, "_root", prev, false);
+                    let target_path = self.current_target();
+                    let prev = stage
+                        .find_timeline(&target_path)
+                        .map_or(0, |t| t.current_frame.saturating_sub(1));
+                    self.queue_goto_frame(stage, &target_path, prev, false);
                 }
                 Op::Play => {
-                    stage.root.playing = true;
+                    let target_path = self.current_target();
+                    if let Some(tl) = stage.find_timeline_mut(&target_path) {
+                        tl.playing = true;
+                    }
                 }
                 Op::Stop => {
-                    stage.root.playing = false;
+                    let target_path = self.current_target();
+                    if let Some(tl) = stage.find_timeline_mut(&target_path) {
+                        tl.playing = false;
+                    }
                 }
                 Op::StopSounds => {
                     self.stop_sounds_requested = true;
                 }
                 Op::GotoFrame(f) => {
-                    self.queue_goto_frame(stage, "_root", *f, false);
+                    let target_path = self.current_target();
+                    self.queue_goto_frame(stage, &target_path, *f, false);
                 }
                 Op::GotoLabel(label) => {
-                    if let Some(f) = stage.root.resolve_label(label) {
-                        self.queue_goto_frame(stage, "_root", f, false);
+                    let target_path = self.current_target();
+                    if let Some(f) = stage
+                        .find_timeline(&target_path)
+                        .and_then(|t| t.resolve_label(label))
+                    {
+                        self.queue_goto_frame(stage, &target_path, f, false);
                     }
                 }
                 Op::GotoFrame2(play_after) => {
                     let target = self.pop();
+                    let target_path = self.current_target();
                     match target {
                         Value::Number(n) if n.is_finite() && (n as i32) >= 1 => {
                             let f = ((n as i32) - 1) as u16;
-                            self.queue_goto_frame(stage, "_root", f, *play_after);
+                            self.queue_goto_frame(stage, &target_path, f, *play_after);
                         }
                         Value::String(s) => {
-                            if let Some(f) = stage.root.resolve_label(&s) {
-                                self.queue_goto_frame(stage, "_root", f, *play_after);
+                            if let Some(f) = stage
+                                .find_timeline(&target_path)
+                                .and_then(|t| t.resolve_label(&s))
+                            {
+                                self.queue_goto_frame(stage, &target_path, f, *play_after);
                             } else if let Ok(n) = s.parse::<u16>() {
                                 if n >= 1 {
-                                    self.queue_goto_frame(stage, "_root", n - 1, *play_after);
+                                    self.queue_goto_frame(stage, &target_path, n - 1, *play_after);
                                 }
+                            }
+                        }
+                        Value::MovieClip(p) => {
+                            if let Some(f) = stage
+                                .find_timeline(&p)
+                                .and_then(|t| t.resolve_label(""))
+                            {
+                                self.queue_goto_frame(stage, &p, f, *play_after);
                             }
                         }
                         _ => {}
@@ -1716,6 +1945,90 @@ impl Avm1 {
                     };
                     self.stack.push(Value::Number(f64::from(r)));
                 }
+                Op::GetTime => {
+                    self.stack.push(Value::Number(self.elapsed_ms as f64));
+                }
+                Op::CharToAscii => {
+                    let s = self.pop().to_avm_string(self.swf_version, &self.heap);
+                    let code = s.chars().next().map_or(0.0, |c| f64::from(c as u32));
+                    self.stack.push(Value::Number(code));
+                }
+                Op::AsciiToChar => {
+                    let code = self.pop().to_i32(self.swf_version);
+                    let s = u32::try_from(code)
+                        .ok()
+                        .and_then(char::from_u32)
+                        .map_or_else(String::new, |c| c.to_string());
+                    self.stack.push(Value::String(s));
+                }
+                Op::TargetPath => {
+                    let v = self.pop();
+                    let out = match v {
+                        Value::MovieClip(p) => {
+                            let canon = self.canonical_target(&p);
+                            format!(
+                                "/{}",
+                                canon.strip_prefix("_root.").unwrap_or("").replace('.', "/")
+                            )
+                        }
+                        _ => String::new(),
+                    };
+                    self.stack.push(Value::String(out));
+                }
+                Op::GetUrl { url, target } => {
+                    if !url.is_empty()
+                        && !url.to_ascii_lowercase().starts_with("fscommand:")
+                        && !url.to_ascii_lowercase().starts_with("javascript:")
+                    {
+                        self.load_movie_requests
+                            .push((url.clone(), target.clone()));
+                    }
+                }
+                Op::GetUrl2 => {
+                    let target = self.pop().to_avm_string(self.swf_version, &self.heap);
+                    let url = self.pop().to_avm_string(self.swf_version, &self.heap);
+                    if !url.is_empty()
+                        && !url.to_ascii_lowercase().starts_with("fscommand:")
+                        && !url.to_ascii_lowercase().starts_with("javascript:")
+                    {
+                        self.load_movie_requests.push((url, target));
+                    }
+                }
+                Op::SetTarget { target, stack_form } => {
+                    let raw = if *stack_form {
+                        self.pop().to_avm_string(self.swf_version, &self.heap)
+                    } else {
+                        target.clone()
+                    };
+                    if !raw.is_empty() {
+                        self.current_target_path =
+                            Stage::resolve_target_path(&self.current_target(), &raw);
+                    }
+                }
+                Op::WaitForFrame {
+                    frame,
+                    skip,
+                    stack_form,
+                } => {
+                    let wanted = if *stack_form {
+                        match self.pop() {
+                            Value::Number(n) if n.is_finite() && n >= 1.0 => (n as u16).saturating_sub(1),
+                            Value::String(s) => stage
+                                .find_timeline(&self.current_target())
+                                .and_then(|t| t.resolve_label(&s))
+                                .unwrap_or(0),
+                            _ => 0,
+                        }
+                    } else {
+                        *frame
+                    };
+                    let loaded = stage
+                        .find_timeline(&self.current_target())
+                        .map_or(0, |t| t.frame_count);
+                    if wanted >= loaded {
+                        pc = pc.saturating_add(usize::from(*skip));
+                    }
+                }
                 Op::GetVariable => {
                     let name = self.pop().to_avm_string(self.swf_version, &self.heap);
                     let val = self.resolve_variable(&name, this_obj, locals, stage);
@@ -1727,10 +2040,16 @@ impl Avm1 {
                     let norm = normalize_key(&name, self.swf_version);
                     if locals.contains_key(&norm) {
                         locals.insert(norm, val);
+                    } else if self.set_path_variable(&name, val.clone(), stage) {
+                        // Assigned through a target path such as `_root.hero.score` or `/hero:score`.
                     } else {
                         let s_str = val.to_avm_string(self.swf_version, &self.heap);
+                        let target_path = self.current_target();
                         stage.sync_variable(&name, &s_str);
-                        self.set_global(&name, val);
+                        self.clip_prop_set(&target_path, &name, val.clone());
+                        if target_path == "_root" {
+                            self.set_global(&name, val);
+                        }
                     }
                 }
                 Op::DefineLocal => {
@@ -1788,20 +2107,30 @@ impl Avm1 {
                 }
                 Op::GetProperty => {
                     let idx = self.pop().to_i32(self.swf_version);
-                    let _target = self.pop();
-                    let val = match idx {
-                        4 => Value::Number(f64::from(stage.root.current_frame) + 1.0), // _currentframe
-                        5 => Value::Number(f64::from(stage.root.frame_count)), // _totalframes
-                        8 => Value::Number(f64::from(stage.width_px)),         // _width
-                        9 => Value::Number(f64::from(stage.height_px)),        // _height
-                        _ => Value::Number(0.0),
+                    let target = self.pop();
+                    let path = match &target {
+                        Value::MovieClip(p) => self.canonical_target(p),
+                        Value::String(s) => self.canonical_target(s),
+                        _ => self.current_target(),
                     };
+                    let prop = swf4_property_name(idx);
+                    let val = prop.map_or(Value::Undefined, |p| {
+                        self.get_member_value(&Value::MovieClip(path.clone()), p, stage)
+                    });
                     self.stack.push(val);
                 }
                 Op::SetProperty => {
-                    let _val = self.pop();
-                    let _idx = self.pop();
-                    let _target = self.pop();
+                    let val = self.pop();
+                    let idx = self.pop().to_i32(self.swf_version);
+                    let target = self.pop();
+                    let path = match &target {
+                        Value::MovieClip(p) => self.canonical_target(p),
+                        Value::String(s) => self.canonical_target(s),
+                        _ => self.current_target(),
+                    };
+                    if let Some(prop) = swf4_property_name(idx) {
+                        self.set_member_value(&Value::MovieClip(path), prop, val, stage);
+                    }
                 }
                 Op::Enumerate => {
                     let obj = self.pop();
@@ -1820,7 +2149,7 @@ impl Avm1 {
                     let func = UserFunction {
                         name: name.clone(),
                         params: params.clone(),
-                        ops: body_ops.clone(),
+                        ops: Arc::from(body_ops.as_slice()),
                         captured_scope: locals.clone(),
                     };
                     let fid = self.heap.alloc_function(func);
@@ -1888,19 +2217,37 @@ impl Avm1 {
     ) -> Value {
         let norm = normalize_key(name, self.swf_version);
         if norm == "this" {
-            return this_obj.map_or_else(|| Value::MovieClip("_root".to_owned()), Value::Object);
+            return this_obj.map_or_else(
+                || Value::MovieClip(self.current_target()),
+                Value::Object,
+            );
         }
         if norm == "_root" || norm == "_level0" {
             return Value::MovieClip("_root".to_owned());
         }
+        if norm == "_parent" {
+            return Value::MovieClip(parent_clip_path(&self.current_target()));
+        }
         if let Some(v) = locals.get(&norm) {
             return v.clone();
         }
-        if norm == "_currentframe" {
-            return Value::Number(f64::from(stage.root.current_frame) + 1.0);
+        if let Some(v) = self.resolve_path_value(name, stage) {
+            return v;
         }
-        if norm == "_totalframes" {
-            return Value::Number(f64::from(stage.root.frame_count));
+        let target = self.current_target();
+        if let Some(v) = self.clip_prop_get(&target, name) {
+            return v;
+        }
+        // A bare name may be a child clip of the current timeline (very common in AS1/AS2).
+        if let Some(child) = stage.resolve_child_clip(&target, name) {
+            return Value::MovieClip(child);
+        }
+        if matches!(norm.as_str(), "_currentframe" | "_totalframes" | "_framesloaded") {
+            return self.get_member_value(
+                &Value::MovieClip(target),
+                &norm,
+                stage,
+            );
         }
         self.get_global(name)
     }
@@ -1915,14 +2262,105 @@ impl Avm1 {
                 }
             }
             Value::MovieClip(path) => {
+                let canon = self.canonical_target(path);
                 let norm = normalize_key(prop, self.swf_version);
+                let timeline = stage.find_timeline(&canon);
+                let display = stage.find_display_object(&canon);
                 match norm.as_str() {
-                    "_currentframe" => Value::Number(f64::from(stage.root.current_frame) + 1.0),
-                    "_totalframes" => Value::Number(f64::from(stage.root.frame_count)),
-                    "_width" => Value::Number(f64::from(stage.width_px)),
-                    "_height" => Value::Number(f64::from(stage.height_px)),
-                    "_name" => Value::String(path.clone()),
-                    _ => self.get_global(prop),
+                    "_root" | "_level0" => return Value::MovieClip("_root".to_owned()),
+                    "_parent" => return Value::MovieClip(parent_clip_path(&canon)),
+                    "_target" => {
+                        return Value::String(format!(
+                            "/{}",
+                            canon
+                                .strip_prefix("_root.")
+                                .unwrap_or("")
+                                .replace('.', "/")
+                        ));
+                    }
+                    "_name" => {
+                        return Value::String(
+                            canon
+                                .rsplit_once('.')
+                                .map_or("", |(_, n)| n)
+                                .to_owned(),
+                        );
+                    }
+                    "_currentframe" => {
+                        return Value::Number(
+                            timeline.map_or(1.0, |t| f64::from(t.current_frame) + 1.0),
+                        );
+                    }
+                    "_totalframes" | "_framesloaded" => {
+                        return Value::Number(timeline.map_or(0.0, |t| f64::from(t.frame_count)));
+                    }
+                    "_x" => return Value::Number(display.map_or(0.0, |o| o.x_px())),
+                    "_y" => return Value::Number(display.map_or(0.0, |o| o.y_px())),
+                    "_xscale" => return Value::Number(display.map_or(100.0, |o| o.xscale_pct())),
+                    "_yscale" => return Value::Number(display.map_or(100.0, |o| o.yscale_pct())),
+                    "_rotation" => {
+                        return Value::Number(display.map_or(0.0, |o| o.rotation_deg()));
+                    }
+                    "_alpha" => return Value::Number(display.map_or(100.0, |o| o.alpha_pct())),
+                    "_visible" => {
+                        return Value::Bool(display.map_or(canon == "_root", |o| o.visible));
+                    }
+                    "_width" => {
+                        return Value::Number(stage.clip_bounds_stage_twips(&canon).map_or(
+                            f64::from(stage.width_px),
+                            |b| f64::from(b.x_max.saturating_sub(b.x_min)) / 20.0,
+                        ));
+                    }
+                    "_height" => {
+                        return Value::Number(stage.clip_bounds_stage_twips(&canon).map_or(
+                            f64::from(stage.height_px),
+                            |b| f64::from(b.y_max.saturating_sub(b.y_min)) / 20.0,
+                        ));
+                    }
+                    "_xmouse" => {
+                        let origin = stage
+                            .clip_bounds_stage_twips(&canon)
+                            .map_or(0.0, |b| f64::from(b.x_min) / 20.0);
+                        return Value::Number(f64::from(stage.pointer_twips.0) / 20.0 - origin);
+                    }
+                    "_ymouse" => {
+                        let origin = stage
+                            .clip_bounds_stage_twips(&canon)
+                            .map_or(0.0, |b| f64::from(b.y_min) / 20.0);
+                        return Value::Number(f64::from(stage.pointer_twips.1) / 20.0 - origin);
+                    }
+                    "text" => {
+                        if let Some(o) = display {
+                            if let Some(t) = &o.dynamic_text {
+                                return Value::String(t.clone());
+                            }
+                        }
+                        if let Some(o) = display {
+                            if let Some(swfr_scene::Character::EditText(e)) =
+                                stage.dictionary.get(&o.character_id)
+                            {
+                                return Value::String(e.initial_text.clone().unwrap_or_default());
+                            }
+                        }
+                    }
+                    "_url" => return Value::String(String::new()),
+                    "_droptarget" => return Value::String(String::new()),
+                    "_focusrect" => return Value::Bool(true),
+                    "_highquality" => return Value::Number(1.0),
+                    "_quality" => return Value::String("HIGH".to_owned()),
+                    "_soundbuftime" => return Value::Number(5.0),
+                    _ => {}
+                }
+                if let Some(v) = self.clip_prop_get(&canon, prop) {
+                    return v;
+                }
+                if let Some(child) = stage.resolve_child_clip(&canon, prop) {
+                    return Value::MovieClip(child);
+                }
+                if canon == "_root" {
+                    self.get_global(prop)
+                } else {
+                    Value::Undefined
                 }
             }
             Value::Object(id) => self.heap.get_prop(*id, prop, self.swf_version),
@@ -1935,10 +2373,77 @@ impl Avm1 {
             Value::Object(id) => {
                 self.heap.set_prop(*id, prop, val, self.swf_version);
             }
-            Value::MovieClip(_) => {
+            Value::MovieClip(path) => {
+                let canon = self.canonical_target(path);
+                let norm = normalize_key(prop, self.swf_version);
+                let mut handled = true;
+                match norm.as_str() {
+                    "_x" => {
+                        if let Some(o) = stage.find_display_object_mut(&canon) {
+                            o.set_x_px(val.to_number(self.swf_version));
+                        }
+                    }
+                    "_y" => {
+                        if let Some(o) = stage.find_display_object_mut(&canon) {
+                            o.set_y_px(val.to_number(self.swf_version));
+                        }
+                    }
+                    "_xscale" => {
+                        if let Some(o) = stage.find_display_object_mut(&canon) {
+                            o.set_xscale_pct(val.to_number(self.swf_version));
+                        }
+                    }
+                    "_yscale" => {
+                        if let Some(o) = stage.find_display_object_mut(&canon) {
+                            o.set_yscale_pct(val.to_number(self.swf_version));
+                        }
+                    }
+                    "_rotation" => {
+                        if let Some(o) = stage.find_display_object_mut(&canon) {
+                            o.set_rotation_deg(val.to_number(self.swf_version));
+                        }
+                    }
+                    "_alpha" => {
+                        if let Some(o) = stage.find_display_object_mut(&canon) {
+                            o.set_alpha_pct(val.to_number(self.swf_version));
+                        }
+                    }
+                    "_visible" => {
+                        if let Some(o) = stage.find_display_object_mut(&canon) {
+                            o.visible = val.to_bool(self.swf_version);
+                        }
+                    }
+                    "_name" => {
+                        let new_name = val.to_avm_string(self.swf_version, &self.heap);
+                        if let Some(o) = stage.find_display_object_mut(&canon) {
+                            o.name = Some(new_name);
+                        }
+                    }
+                    "text" => {
+                        let s = val.to_avm_string(self.swf_version, &self.heap);
+                        let mut direct = false;
+                        if let Some(o) = stage.find_display_object_mut(&canon) {
+                            o.dynamic_text = Some(s.clone());
+                            direct = true;
+                        }
+                        if !direct {
+                            stage.sync_variable(&format!("{canon}.text"), &s);
+                        }
+                    }
+                    "_currentframe" | "_totalframes" | "_framesloaded" | "_width" | "_height"
+                    | "_target" | "_parent" | "_root" => {}
+                    _ => handled = false,
+                }
+                if handled {
+                    stage.mark_stage_dirty();
+                    return;
+                }
                 let s_str = val.to_avm_string(self.swf_version, &self.heap);
                 stage.sync_variable(prop, &s_str);
-                self.set_global(prop, val);
+                self.clip_prop_set(&canon, prop, val.clone());
+                if canon == "_root" {
+                    self.set_global(prop, val);
+                }
             }
             _ => {}
         }
@@ -2154,13 +2659,18 @@ impl Avm1 {
 
         // 2. MovieClip methods
         if let Value::MovieClip(path) = receiver {
+            let canon = self.canonical_target(path);
             return match norm.as_str() {
                 "play" => {
-                    stage.root.playing = true;
+                    if let Some(tl) = stage.find_timeline_mut(&canon) {
+                        tl.playing = true;
+                    }
                     Value::Undefined
                 }
                 "stop" => {
-                    stage.root.playing = false;
+                    if let Some(tl) = stage.find_timeline_mut(&canon) {
+                        tl.playing = false;
+                    }
                     Value::Undefined
                 }
                 "gotoandstop" | "gotoandplay" => {
@@ -2169,11 +2679,18 @@ impl Avm1 {
                         match arg {
                             Value::Number(n) if n.is_finite() && (*n as i32) >= 1 => {
                                 let f = ((*n as i32) - 1) as u16;
-                                self.queue_goto_frame(stage, path, f, play_after);
+                                self.queue_goto_frame(stage, &canon, f, play_after);
                             }
                             Value::String(lbl) => {
-                                if let Some(f) = stage.root.resolve_label(lbl) {
-                                    self.queue_goto_frame(stage, path, f, play_after);
+                                if let Some(f) = stage
+                                    .find_timeline(&canon)
+                                    .and_then(|t| t.resolve_label(lbl))
+                                {
+                                    self.queue_goto_frame(stage, &canon, f, play_after);
+                                } else if let Ok(n) = lbl.parse::<u16>() {
+                                    if n >= 1 {
+                                        self.queue_goto_frame(stage, &canon, n - 1, play_after);
+                                    }
                                 }
                             }
                             _ => {}
@@ -2181,14 +2698,148 @@ impl Avm1 {
                     }
                     Value::Undefined
                 }
+                "nextframe" => {
+                    let next = stage.find_timeline(&canon).map_or(0, |t| {
+                        t.current_frame
+                            .saturating_add(1)
+                            .min(t.frame_count.saturating_sub(1))
+                    });
+                    self.queue_goto_frame(stage, &canon, next, false);
+                    Value::Undefined
+                }
+                "prevframe" => {
+                    let prev = stage
+                        .find_timeline(&canon)
+                        .map_or(0, |t| t.current_frame.saturating_sub(1));
+                    self.queue_goto_frame(stage, &canon, prev, false);
+                    Value::Undefined
+                }
+                "createemptymovieclip" => {
+                    let name = args.first().map_or_else(String::new, |v| {
+                        v.to_avm_string(self.swf_version, &self.heap)
+                    });
+                    let depth = args
+                        .get(1)
+                        .map_or(1, |v| v.to_i32(self.swf_version).clamp(0, 65535) as u16);
+                    let child = stage.create_empty_movie_clip(&canon, &name, depth);
+                    Value::MovieClip(child)
+                }
+                "attachmovie" => {
+                    let id_name = args.first().map_or_else(String::new, |v| {
+                        v.to_avm_string(self.swf_version, &self.heap)
+                    });
+                    let new_name = args.get(1).map_or_else(String::new, |v| {
+                        v.to_avm_string(self.swf_version, &self.heap)
+                    });
+                    let depth = args
+                        .get(2)
+                        .map_or(1, |v| v.to_i32(self.swf_version).clamp(0, 65535) as u16);
+                    match stage.attach_movie(&canon, &id_name, &new_name, depth) {
+                        Some((child, ev)) => {
+                            for (t, code) in ev.actions {
+                                self.execute_bytecode_for_target(&code, &t, stage);
+                            }
+                            Value::MovieClip(child)
+                        }
+                        None => Value::Undefined,
+                    }
+                }
+                "duplicatemovieclip" => {
+                    let new_name = args.first().map_or_else(String::new, |v| {
+                        v.to_avm_string(self.swf_version, &self.heap)
+                    });
+                    let depth = args
+                        .get(1)
+                        .map_or(1, |v| v.to_i32(self.swf_version).clamp(0, 65535) as u16);
+                    stage
+                        .duplicate_movie_clip(&canon, &new_name, depth)
+                        .map_or(Value::Undefined, Value::MovieClip)
+                }
+                "removemovieclip" => {
+                    let _ = stage.remove_movie_clip(&canon);
+                    Value::Undefined
+                }
+                "unloadmovie" => {
+                    if canon != "_root" {
+                        let _ = stage.remove_movie_clip(&canon);
+                    }
+                    Value::Undefined
+                }
+                "swapdepths" => {
+                    let depth = match args.first() {
+                        Some(Value::MovieClip(other)) => stage
+                            .find_display_object(&self.canonical_target(other))
+                            .map_or(0, |o| o.depth),
+                        Some(v) => v.to_i32(self.swf_version).clamp(0, 65535) as u16,
+                        None => 0,
+                    };
+                    let _ = stage.swap_depths(&canon, depth);
+                    Value::Undefined
+                }
+                "getnexthighestdepth" => {
+                    Value::Number(f64::from(stage.get_next_highest_depth(&canon)))
+                }
+                "getbytesloaded" | "getbytestotal" => {
+                    Value::Number(f64::from(stage.swf_byte_len))
+                }
+                "hittest" => {
+                    let shape_flag = args
+                        .get(2)
+                        .map_or(false, |v| v.to_bool(self.swf_version));
+                    match args.first() {
+                        Some(Value::MovieClip(other)) => {
+                            let other_canon = self.canonical_target(other);
+                            let a = stage.clip_bounds_stage_twips(&canon);
+                            let b = stage.clip_bounds_stage_twips(&other_canon);
+                            match (a, b) {
+                                (Some(a), Some(b)) => Value::Bool(
+                                    a.x_min <= b.x_max
+                                        && b.x_min <= a.x_max
+                                        && a.y_min <= b.y_max
+                                        && b.y_min <= a.y_max,
+                                ),
+                                _ => Value::Bool(false),
+                            }
+                        }
+                        Some(xv) => {
+                            let x = (xv.to_number(self.swf_version) * 20.0).round() as i32;
+                            let y = args.get(1).map_or(0, |v| {
+                                (v.to_number(self.swf_version) * 20.0).round() as i32
+                            });
+                            Value::Bool(stage.hit_test_point(&canon, x, y, shape_flag))
+                        }
+                        None => Value::Bool(false),
+                    }
+                }
                 "loadmovie" => {
                     let url = args.first().map_or_else(String::new, |v| {
                         v.to_avm_string(self.swf_version, &self.heap)
                     });
-                    self.load_movie_requests.push((url, path.clone()));
+                    self.load_movie_requests.push((url, canon.clone()));
                     Value::Undefined
                 }
-                _ => Value::Undefined,
+                "geturl" => {
+                    let url = args.first().map_or_else(String::new, |v| {
+                        v.to_avm_string(self.swf_version, &self.heap)
+                    });
+                    if !url.is_empty() {
+                        self.load_movie_requests.push((url, canon.clone()));
+                    }
+                    Value::Undefined
+                }
+                _ => {
+                    if let Some(Value::Object(fid)) = self.clip_prop_get(&canon, mname) {
+                        let previous = self.current_target_path.clone();
+                        self.current_target_path = canon.clone();
+                        let ret = self
+                            .invoke_user_function(fid, None, args, stage, budget)
+                            .unwrap_or(Value::Undefined);
+                        self.current_target_path = previous;
+                        ret
+                    } else {
+                        Value::Undefined
+                    }
+                }
             };
         }
 
@@ -2273,8 +2924,136 @@ impl Avm1 {
                     _ => Value::Undefined,
                 };
             }
+            if btag == "Color" {
+                let target_path = match self.heap.get_prop(obj_id, "__target", self.swf_version) {
+                    Value::MovieClip(p) => self.canonical_target(&p),
+                    Value::String(s) => self.canonical_target(&s),
+                    _ => self.current_target(),
+                };
+                return match norm.as_str() {
+                    "setrgb" => {
+                        let rgb = args
+                            .first()
+                            .map_or(0, |v| v.to_i32(self.swf_version))
+                            .cast_unsigned();
+                        if let Some(o) = stage.find_display_object_mut(&target_path) {
+                            o.color_transform.r_mult = 0;
+                            o.color_transform.g_mult = 0;
+                            o.color_transform.b_mult = 0;
+                            o.color_transform.a_mult = 256;
+                            o.color_transform.r_add = ((rgb >> 16) & 0xFF) as i16;
+                            o.color_transform.g_add = ((rgb >> 8) & 0xFF) as i16;
+                            o.color_transform.b_add = (rgb & 0xFF) as i16;
+                            o.color_transform.a_add = 0;
+                        }
+                        stage.mark_stage_dirty();
+                        Value::Undefined
+                    }
+                    "getrgb" => {
+                        let val = stage.find_display_object(&target_path).map_or(0, |o| {
+                            let cx = o.color_transform;
+                            let chan = |mult: i16, add: i16| -> i32 {
+                                (((255 * i32::from(mult)) >> 8) + i32::from(add)).clamp(0, 255)
+                            };
+                            let r = chan(cx.r_mult, cx.r_add);
+                            let g = chan(cx.g_mult, cx.g_add);
+                            let b = chan(cx.b_mult, cx.b_add);
+                            (r << 16) | (g << 8) | b
+                        });
+                        Value::Number(f64::from(val))
+                    }
+                    "settransform" => {
+                        if let Some(Value::Object(cx_id)) = args.first() {
+                            let getp = |k: &str| {
+                                self.heap
+                                    .get_prop(*cx_id, k, self.swf_version)
+                                    .to_number(self.swf_version)
+                            };
+                            if let Some(o) = stage.find_display_object_mut(&target_path) {
+                                o.color_transform.r_mult = (getp("ra") * 2.56).round() as i16;
+                                o.color_transform.g_mult = (getp("ga") * 2.56).round() as i16;
+                                o.color_transform.b_mult = (getp("ba") * 2.56).round() as i16;
+                                o.color_transform.a_mult = (getp("aa") * 2.56).round() as i16;
+                                o.color_transform.r_add = getp("rb").round() as i16;
+                                o.color_transform.g_add = getp("gb").round() as i16;
+                                o.color_transform.b_add = getp("bb").round() as i16;
+                                o.color_transform.a_add = getp("ab").round() as i16;
+                            }
+                            stage.mark_stage_dirty();
+                        }
+                        Value::Undefined
+                    }
+                    "gettransform" => {
+                        let out = self.heap.alloc_object(None);
+                        if let Some(o) = stage.find_display_object(&target_path) {
+                            let cx = o.color_transform;
+                            for (k, v) in [
+                                ("ra", f64::from(cx.r_mult) / 2.56),
+                                ("ga", f64::from(cx.g_mult) / 2.56),
+                                ("ba", f64::from(cx.b_mult) / 2.56),
+                                ("aa", f64::from(cx.a_mult) / 2.56),
+                                ("rb", f64::from(cx.r_add)),
+                                ("gb", f64::from(cx.g_add)),
+                                ("bb", f64::from(cx.b_add)),
+                                ("ab", f64::from(cx.a_add)),
+                            ] {
+                                self.heap.set_prop(out, k, Value::Number(v), self.swf_version);
+                            }
+                        }
+                        Value::Object(out)
+                    }
+                    _ => Value::Undefined,
+                };
+            }
             if btag == "Sound" {
                 return match norm.as_str() {
+                    "attachsound" => {
+                        let linkage = args.first().map_or_else(String::new, |v| {
+                            v.to_avm_string(self.swf_version, &self.heap)
+                        });
+                        if let Some(cid) = stage
+                            .exports
+                            .get(&linkage)
+                            .or_else(|| stage.exports.get(&linkage.to_ascii_lowercase()))
+                            .copied()
+                        {
+                            self.heap.set_prop(
+                                obj_id,
+                                "__sound_id",
+                                Value::Number(f64::from(cid)),
+                                self.swf_version,
+                            );
+                        }
+                        self.heap.set_prop(
+                            obj_id,
+                            "__sound_name",
+                            Value::String(linkage),
+                            self.swf_version,
+                        );
+                        Value::Undefined
+                    }
+                    "start" => {
+                        if let Value::Number(idn) =
+                            self.heap.get_prop(obj_id, "__sound_id", self.swf_version)
+                        {
+                            let offset_secs = args
+                                .first()
+                                .map_or(0.0, |v| v.to_number(self.swf_version))
+                                .max(0.0);
+                            let loops = args.get(1).map_or(1, |v| {
+                                v.to_i32(self.swf_version).clamp(1, 65535) as u16
+                            });
+                            self.sound_starts.push((
+                                idn as u16,
+                                SoundInfo {
+                                    in_point: Some((offset_secs * 44100.0).round() as u32),
+                                    loop_count: Some(loops),
+                                    ..SoundInfo::default()
+                                },
+                            ));
+                        }
+                        Value::Undefined
+                    }
                     "setvolume" => {
                         self.sound_volume = args
                             .first()
@@ -2282,8 +3061,25 @@ impl Avm1 {
                         Value::Undefined
                     }
                     "getvolume" => Value::Number(f64::from(self.sound_volume)),
+                    "setpan" | "settransform" => Value::Undefined,
+                    "getpan" | "gettransform" => Value::Number(0.0),
+                    "getbytesloaded" | "getbytestotal" => {
+                        Value::Number(f64::from(stage.swf_byte_len))
+                    }
                     "stop" => {
-                        self.stop_sounds_requested = true;
+                        if let Value::Number(idn) =
+                            self.heap.get_prop(obj_id, "__sound_id", self.swf_version)
+                        {
+                            self.sound_starts.push((
+                                idn as u16,
+                                SoundInfo {
+                                    sync_stop: true,
+                                    ..SoundInfo::default()
+                                },
+                            ));
+                        } else {
+                            self.stop_sounds_requested = true;
+                        }
                         Value::Undefined
                     }
                     _ => Value::Undefined,
@@ -2389,6 +3185,22 @@ impl Avm1 {
                     self.swf_version,
                 );
                 Value::Object(sid)
+            }
+            "color" => {
+                let cid = self.heap.alloc_object(None);
+                self.heap.set_prop(
+                    cid,
+                    "__builtin__",
+                    Value::String("Color".to_owned()),
+                    self.swf_version,
+                );
+                let target = match args.first() {
+                    Some(Value::MovieClip(p)) => Value::MovieClip(self.canonical_target(p)),
+                    Some(Value::String(s)) => Value::MovieClip(self.canonical_target(s)),
+                    _ => Value::MovieClip(self.current_target()),
+                };
+                self.heap.set_prop(cid, "__target", target, self.swf_version);
+                Value::Object(cid)
             }
             "string" => Value::String(args.first().map_or_else(String::new, |v| {
                 v.to_avm_string(self.swf_version, &self.heap)

@@ -9,7 +9,7 @@
 use swfr_audio::AudioMixer;
 use swfr_avm1::Avm1;
 use swfr_render::Renderer;
-use swfr_scene::{FrameEvents, Stage};
+use swfr_scene::{Character, FrameEvents, Stage};
 use swfr_swf::{Movie, Tag};
 
 /// Fixed output audio sample rate in Hz (TSD 2.5, 2.8).
@@ -384,8 +384,8 @@ impl Player {
             .saturating_mul(250_000)
             .max(10_000);
         let mut audio = AudioMixer::new();
-        for tag in &movie.tags {
-            if let Tag::DefineSound(snd) = tag {
+        for ch in stage.dictionary.values() {
+            if let Character::Sound(snd) = ch {
                 audio.register_sound(snd);
             }
         }
@@ -752,8 +752,8 @@ impl Player {
                 .saturating_mul(250_000)
                 .max(10_000);
             rt.audio = AudioMixer::new();
-            for tag in &rt.movie.tags {
-                if let Tag::DefineSound(snd) = tag {
+            for ch in rt.stage.dictionary.values() {
+                if let Character::Sound(snd) = ch {
                     rt.audio.register_sound(snd);
                 }
             }
@@ -834,8 +834,8 @@ impl Player {
         for (sid, info) in events.start_sounds {
             audio.start_sound(sid, &info);
         }
-        for (_, code) in events.actions {
-            vm.execute_bytecode(&code, stage);
+        for (target, code) in events.actions {
+            vm.execute_bytecode_for_target(&code, &target, stage);
             Self::drain_vm_logs(vm, audio, trace_to_log, logs);
         }
     }
@@ -864,6 +864,9 @@ impl Player {
             });
         }
         audio.volume_percent = vm.sound_volume;
+        for (sid, info) in vm.sound_starts.drain(..) {
+            audio.start_sound(sid, &info);
+        }
         if vm.stop_sounds_requested {
             vm.stop_sounds_requested = false;
             audio.stop_all_sounds();

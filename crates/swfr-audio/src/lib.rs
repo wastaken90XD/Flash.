@@ -9,6 +9,7 @@
 
 use std::collections::BTreeMap;
 use std::io::Cursor;
+use std::sync::Arc;
 use swfr_reader::Reader;
 use swfr_swf::{AudioFormat, SoundDef, SoundInfo, SoundStreamHeadDef};
 use symphonia::core::audio::SampleBuffer;
@@ -336,7 +337,7 @@ pub fn decode_stream_block(head: &SoundStreamHeadDef, data: &[u8]) -> Vec<[i16; 
 #[derive(Debug, Clone)]
 struct ActiveVoice {
     sound_id: u16,
-    samples_44k1: Vec<[i16; 2]>,
+    samples_44k1: Arc<[[i16; 2]]>,
     pos: usize,
     end_pos: usize,
     loops_remaining: u16,
@@ -347,7 +348,8 @@ struct ActiveVoice {
 /// frame-locked streaming audio (`SoundStreamHead` / `SoundStreamBlock`) (TSD 2.8, M5).
 #[derive(Debug, Clone, Default)]
 pub struct AudioMixer {
-    defined_sounds: BTreeMap<u16, Vec<[i16; 2]>>,
+    raw_sounds: BTreeMap<u16, SoundDef>,
+    defined_sounds: BTreeMap<u16, Arc<[[i16; 2]]>>,
     voices: Vec<ActiveVoice>,
     stream_head: Option<SoundStreamHeadDef>,
     stream_fifo: Vec<[i16; 2]>,
@@ -360,6 +362,7 @@ impl AudioMixer {
     #[must_use]
     pub const fn new() -> Self {
         Self {
+            raw_sounds: BTreeMap::new(),
             defined_sounds: BTreeMap::new(),
             voices: Vec::new(),
             stream_head: None,
@@ -368,10 +371,9 @@ impl AudioMixer {
         }
     }
 
-    /// Pre-decodes and registers a [`SoundDef`] (`DefineSound`) in the mixer's bank.
+    /// Registers a [`SoundDef`] (`DefineSound`) in the mixer's bank (decoded lazily on first playback).
     pub fn register_sound(&mut self, snd: &SoundDef) {
-        let pcm = decode_sound_def(snd);
-        self.defined_sounds.insert(snd.id, pcm);
+        self.raw_sounds.insert(snd.id, snd.clone());
     }
 
     /// Triggers or stops an event sound (`StartSound`).
@@ -386,7 +388,13 @@ impl AudioMixer {
         if self.voices.len() >= MAX_VOICES {
             self.voices.remove(0);
         }
-        let Some(samples) = self.defined_sounds.get(&sound_id).cloned() else {
+        let samples = if let Some(cached) = self.defined_sounds.get(&sound_id) {
+            Arc::clone(cached)
+        } else if let Some(snd) = self.raw_sounds.get(&sound_id) {
+            let pcm: Arc<[[i16; 2]]> = Arc::from(decode_sound_def(snd));
+            self.defined_sounds.insert(sound_id, Arc::clone(&pcm));
+            pcm
+        } else {
             return;
         };
         if samples.is_empty() {

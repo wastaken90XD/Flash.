@@ -1,6 +1,6 @@
-//! CPU 2D software renderer (`tiny-skia`) for `swfr` with a 64-entry flattened-shape LRU cache,
-//! dirty-rectangle tracking, clipping masks, gradients, bitmaps, embedded & device text,
-//! and `XRGB8888` / `RGB565` output conversion (TSD 1.6, 2.7, 2.12 M2 & M3).
+//! CPU 2D software renderer (`tiny-skia`) for `swfr` with pre-flattened shape/glyph lookup,
+//! morph-shape LRU cache, dirty-rectangle tracking, clipping masks, gradients, zero-copy bitmaps,
+//! embedded & device text, and `XRGB8888` / `RGB565` output conversion (TSD 1.6, 2.7, 2.12 M2 & M3).
 #![allow(
     clippy::arithmetic_side_effects,
     clippy::collapsible_if,
@@ -8,16 +8,17 @@
 )]
 
 use std::collections::BTreeMap;
-use swfr_reader::{ColorTransform, Matrix, Rect};
+use std::sync::Arc;
+use swfr_reader::{ColorTransform, Matrix};
 use swfr_scene::{
-    flatten_morph_shape, flatten_shape, ButtonState, Character, DecodedBitmap, DisplayObject,
-    FlattenedShape, PathCmd, Stage,
+    flatten_glyph_records, flatten_morph_shape, flatten_shape, ButtonState, Character,
+    DecodedBitmap, DisplayObject, FlattenedShape, PathCmd, Stage,
 };
-use swfr_swf::{ButtonDef, EditTextDef, FillStyle, FontDef, Rgba, ShapeDef, ShapeRecord, TextDef};
+use swfr_swf::{ButtonDef, EditTextDef, FillStyle, FontDef, Rgba, ShapeRecord, TextDef};
 use tiny_skia::{
     Color, FillRule, FilterQuality, GradientStop as SkiaStop, LineCap, LineJoin, LinearGradient,
-    Mask, Paint, Path, PathBuilder, Pattern, Pixmap, Point, RadialGradient, SpreadMode, Stroke,
-    Transform,
+    Mask, Paint, Path, PathBuilder, Pattern, Pixmap, PixmapRef, Point, RadialGradient, SpreadMode,
+    Stroke, Transform,
 };
 
 /// Maximum entries in the flattened-shape LRU cache (TSD 2.12 M2 Task 3).
@@ -27,7 +28,7 @@ pub const SHAPE_LRU_CAPACITY: usize = 64;
 struct LruEntry {
     key: (u16, u16),
     last_used: u64,
-    shape: FlattenedShape,
+    shape: Arc<FlattenedShape>,
 }
 
 /// Bounded 64-entry LRU cache mapping `(character_id, ratio)` to [`FlattenedShape`].
@@ -50,7 +51,15 @@ impl ShapeCache {
     /// Returns a cached [`FlattenedShape`] or computes and inserts it, evicting the least-recently-used
     /// entry when at [`SHAPE_LRU_CAPACITY`].
     #[allow(clippy::indexing_slicing)]
-    pub fn get_or_insert_with<F>(&mut self, key: (u16, u16), compute: F) -> &FlattenedShape
+    pub fn get_or_insert_with<F>(&mut self, key: (u16, u16), compute: F) -> Arc<FlattenedShape>
+    where
+        F: FnOnce() -> FlattenedShape,
+    {
+        self.get_or_insert_arc(key, compute)
+    }
+
+    #[allow(clippy::indexing_slicing)]
+    fn get_or_insert_arc<F>(&mut self, key: (u16, u16), compute: F) -> Arc<FlattenedShape>
     where
         F: FnOnce() -> FlattenedShape,
     {
@@ -60,9 +69,9 @@ impl ShapeCache {
             if let Some(entry) = self.entries.get_mut(pos) {
                 entry.last_used = now;
             }
-            return &self.entries[pos].shape;
+            return Arc::clone(&self.entries[pos].shape);
         }
-        let shape = compute();
+        let shape = Arc::new(compute());
         if self.entries.len() >= SHAPE_LRU_CAPACITY {
             if let Some((oldest_idx, _)) = self
                 .entries
@@ -76,11 +85,16 @@ impl ShapeCache {
         self.entries.push(LruEntry {
             key,
             last_used: now,
-            shape,
+            shape: Arc::clone(&shape),
         });
-        let last = self.entries.len().saturating_sub(1);
-        &self.entries[last].shape
+        shape
     }
+}
+
+struct SceneContext<'a> {
+    dict: &'a BTreeMap<u16, Character>,
+    flattened_shapes: &'a BTreeMap<u16, Arc<FlattenedShape>>,
+    flattened_glyphs: &'a BTreeMap<(u16, usize), Arc<[PathCmd]>>,
 }
 
 /// Software 2D renderer backed by [`tiny_skia::Pixmap`].
@@ -161,12 +175,17 @@ impl Renderer {
         let bg = stage.background_color;
         self.pixmap.fill(Color::from_rgba8(bg.r, bg.g, bg.b, 255));
 
+        let ctx = SceneContext {
+            dict: &stage.dictionary,
+            flattened_shapes: &stage.flattened_shapes,
+            flattened_glyphs: &stage.flattened_glyphs,
+        };
         let root_xform = Transform::from_scale(self.scale as f32 / 20.0, self.scale as f32 / 20.0);
         render_display_list(
             &mut self.pixmap,
             &mut self.cache,
             &stage.root.display_list,
-            &stage.dictionary,
+            &ctx,
             root_xform,
             ColorTransform::IDENTITY,
             None,
@@ -236,18 +255,17 @@ impl Renderer {
     #[allow(clippy::arithmetic_side_effects, clippy::indexing_slicing)]
     fn sync_output_buffers(&mut self) {
         let data = self.pixmap.data();
-        for (i, px) in data.chunks_exact(4).enumerate() {
-            // tiny-skia stores premultiplied RGBA; since background is opaque (A=255), R/G/B are final
+        for ((px, slot_xrgb), slot_565) in data
+            .chunks_exact(4)
+            .zip(self.xrgb_buf.iter_mut())
+            .zip(self.rgb565_buf.iter_mut())
+        {
             let r = u32::from(px[0]);
             let g = u32::from(px[1]);
             let b = u32::from(px[2]);
             let xrgb = (r << 16) | (g << 8) | b;
-            if let Some(slot) = self.xrgb_buf.get_mut(i) {
-                *slot = xrgb;
-            }
-            if let Some(slot565) = self.rgb565_buf.get_mut(i) {
-                *slot565 = xrgb_to_rgb565(xrgb);
-            }
+            *slot_xrgb = xrgb;
+            *slot_565 = xrgb_to_rgb565(xrgb);
         }
     }
 }
@@ -264,7 +282,7 @@ fn render_display_list(
     pixmap: &mut Pixmap,
     cache: &mut ShapeCache,
     display_list: &BTreeMap<u16, DisplayObject>,
-    dict: &BTreeMap<u16, Character>,
+    ctx: &SceneContext<'_>,
     parent_xform: Transform,
     parent_cx: ColorTransform,
     inherited_mask: Option<&Mask>,
@@ -277,6 +295,9 @@ fn render_display_list(
                 active_clip = None;
             }
         }
+        if !obj.visible {
+            continue;
+        }
 
         let obj_xform = parent_xform.pre_concat(matrix_to_skia(obj.matrix));
         let obj_cx = combine_cxform(parent_cx, obj.color_transform);
@@ -288,7 +309,7 @@ fn render_display_list(
                         &mut mask_pm,
                         cache,
                         obj,
-                        dict,
+                        ctx,
                         obj_xform,
                         ColorTransform::IDENTITY,
                         None,
@@ -302,7 +323,7 @@ fn render_display_list(
 
         let mask_ref = active_clip.as_ref().map(|(_, m)| m).or(inherited_mask);
 
-        render_object(pixmap, cache, obj, dict, obj_xform, obj_cx, mask_ref);
+        render_object(pixmap, cache, obj, ctx, obj_xform, obj_cx, mask_ref);
     }
 }
 
@@ -311,34 +332,37 @@ fn render_object(
     pixmap: &mut Pixmap,
     cache: &mut ShapeCache,
     obj: &DisplayObject,
-    dict: &BTreeMap<u16, Character>,
+    ctx: &SceneContext<'_>,
     xform: Transform,
     cx: ColorTransform,
     mask: Option<&Mask>,
 ) {
-    let Some(ch) = dict.get(&obj.character_id) else {
+    if !obj.visible {
+        return;
+    }
+    let Some(ch) = ctx.dict.get(&obj.character_id) else {
         return;
     };
     match ch {
         Character::Shape(shape_def) => {
-            let flat = cache
-                .get_or_insert_with((obj.character_id, 0), || flatten_shape(shape_def))
-                .clone();
-            render_flattened_shape(pixmap, &flat, dict, xform, cx, mask);
+            if let Some(flat) = ctx.flattened_shapes.get(&obj.character_id) {
+                render_flattened_shape(pixmap, flat, ctx.dict, xform, cx, mask);
+            } else {
+                let flat = cache.get_or_insert_arc((obj.character_id, 0), || flatten_shape(shape_def));
+                render_flattened_shape(pixmap, &flat, ctx.dict, xform, cx, mask);
+            }
         }
         Character::MorphShape(morph_def) => {
-            let flat = cache
-                .get_or_insert_with((obj.character_id, obj.ratio), || {
-                    flatten_morph_shape(morph_def, obj.ratio)
-                })
-                .clone();
-            render_flattened_shape(pixmap, &flat, dict, xform, cx, mask);
+            let flat = cache.get_or_insert_arc((obj.character_id, obj.ratio), || {
+                flatten_morph_shape(morph_def, obj.ratio)
+            });
+            render_flattened_shape(pixmap, &flat, ctx.dict, xform, cx, mask);
         }
         Character::Bitmap(bmp) => {
             render_bitmap_quad(pixmap, bmp, xform, cx, mask);
         }
         Character::Text(txt) => {
-            render_static_text(pixmap, txt, dict, xform, cx, mask);
+            render_static_text(pixmap, txt, ctx, xform, cx, mask);
         }
         Character::EditText(edit) => {
             let text_str = obj
@@ -346,14 +370,14 @@ fn render_object(
                 .as_deref()
                 .or(edit.initial_text.as_deref())
                 .unwrap_or("");
-            render_edit_text(pixmap, edit, text_str, dict, xform, cx, mask);
+            render_edit_text(pixmap, edit, text_str, ctx, xform, cx, mask);
         }
         Character::Button(btn) => {
-            render_button(pixmap, cache, btn, obj.button_state, dict, xform, cx, mask);
+            render_button(pixmap, cache, btn, obj.button_state, ctx, xform, cx, mask);
         }
         Character::Sprite { .. } => {
             if let Some(ref child_tl) = obj.sprite_timeline {
-                render_display_list(pixmap, cache, &child_tl.display_list, dict, xform, cx, mask);
+                render_display_list(pixmap, cache, &child_tl.display_list, ctx, xform, cx, mask);
             }
         }
         Character::Font(_) | Character::Sound(_) => {}
@@ -450,18 +474,30 @@ fn render_flattened_shape(
                 smoothed,
             } => {
                 if let Some(Character::Bitmap(bmp)) = dict.get(bitmap_id) {
-                    if let Some(bmp_pm) = decoded_bitmap_to_pixmap(bmp, cx) {
-                        let spread = if *repeating {
-                            SpreadMode::Repeat
-                        } else {
-                            SpreadMode::Pad
-                        };
-                        let quality = if *smoothed {
-                            FilterQuality::Bilinear
-                        } else {
-                            FilterQuality::Nearest
-                        };
-                        let pat_xform = matrix_to_skia(*matrix);
+                    let spread = if *repeating {
+                        SpreadMode::Repeat
+                    } else {
+                        SpreadMode::Pad
+                    };
+                    let quality = if *smoothed {
+                        FilterQuality::Bilinear
+                    } else {
+                        FilterQuality::Nearest
+                    };
+                    let pat_xform = matrix_to_skia(*matrix);
+                    if cx == ColorTransform::IDENTITY {
+                        if let Some(pm_ref) =
+                            PixmapRef::from_bytes(&bmp.premultiplied_rgba, bmp.width, bmp.height)
+                        {
+                            let shader = Pattern::new(pm_ref, spread, quality, 1.0, pat_xform);
+                            let paint = Paint {
+                                shader,
+                                anti_alias: true,
+                                ..Paint::default()
+                            };
+                            pixmap.fill_path(&path, &paint, FillRule::EvenOdd, xform, mask);
+                        }
+                    } else if let Some(bmp_pm) = decoded_bitmap_to_pixmap(bmp, cx) {
                         let shader = Pattern::new(bmp_pm.as_ref(), spread, quality, 1.0, pat_xform);
                         let paint = Paint {
                             shader,
@@ -502,9 +538,6 @@ fn render_bitmap_quad(
     cx: ColorTransform,
     mask: Option<&Mask>,
 ) {
-    let Some(bmp_pm) = decoded_bitmap_to_pixmap(bmp, cx) else {
-        return;
-    };
     let w_twips = (bmp.width as f32) * 20.0;
     let h_twips = (bmp.height as f32) * 20.0;
     let mut pb = PathBuilder::new();
@@ -516,26 +549,45 @@ fn render_bitmap_quad(
     let Some(path) = pb.finish() else {
         return;
     };
-    let shader = Pattern::new(
-        bmp_pm.as_ref(),
-        SpreadMode::Pad,
-        FilterQuality::Bilinear,
-        1.0,
-        Transform::from_scale(20.0, 20.0),
-    );
-    let paint = Paint {
-        shader,
-        anti_alias: true,
-        ..Paint::default()
-    };
-    pixmap.fill_path(&path, &paint, FillRule::EvenOdd, xform, mask);
+    if cx == ColorTransform::IDENTITY {
+        if let Some(pm_ref) = PixmapRef::from_bytes(&bmp.premultiplied_rgba, bmp.width, bmp.height)
+        {
+            let shader = Pattern::new(
+                pm_ref,
+                SpreadMode::Pad,
+                FilterQuality::Bilinear,
+                1.0,
+                Transform::from_scale(20.0, 20.0),
+            );
+            let paint = Paint {
+                shader,
+                anti_alias: true,
+                ..Paint::default()
+            };
+            pixmap.fill_path(&path, &paint, FillRule::EvenOdd, xform, mask);
+        }
+    } else if let Some(bmp_pm) = decoded_bitmap_to_pixmap(bmp, cx) {
+        let shader = Pattern::new(
+            bmp_pm.as_ref(),
+            SpreadMode::Pad,
+            FilterQuality::Bilinear,
+            1.0,
+            Transform::from_scale(20.0, 20.0),
+        );
+        let paint = Paint {
+            shader,
+            anti_alias: true,
+            ..Paint::default()
+        };
+        pixmap.fill_path(&path, &paint, FillRule::EvenOdd, xform, mask);
+    }
 }
 
 #[allow(clippy::arithmetic_side_effects)]
 fn render_static_text(
     pixmap: &mut Pixmap,
     txt: &TextDef,
-    dict: &BTreeMap<u16, Character>,
+    ctx: &SceneContext<'_>,
     parent_xform: Transform,
     cx: ColorTransform,
     mask: Option<&Mask>,
@@ -549,7 +601,7 @@ fn render_static_text(
 
     for rec in &txt.records {
         if let Some(fid) = rec.font_id {
-            if let Some(Character::Font(f)) = dict.get(&fid) {
+            if let Some(Character::Font(f)) = ctx.dict.get(&fid) {
                 cur_font = Some(f);
             }
         }
@@ -575,20 +627,23 @@ fn render_static_text(
             let glyph_scale = cur_height / em_square;
             for entry in &rec.glyphs {
                 let g_idx = usize::try_from(entry.glyph_index).unwrap_or(usize::MAX);
-                if let Some(glyph_records) = font.glyphs.get(g_idx) {
-                    render_glyph_records(
+                let gxform = text_xform.pre_concat(Transform::from_row(
+                    glyph_scale,
+                    0.0,
+                    0.0,
+                    glyph_scale,
+                    cur_x,
+                    cur_y,
+                ));
+                if let Some(cmds) = ctx.flattened_glyphs.get(&(font.id, g_idx)) {
+                    render_glyph_cmds(pixmap, cmds, cur_color, cx, gxform, mask);
+                } else if let Some(glyph_records) = font.glyphs.get(g_idx) {
+                    render_glyph_records_fallback(
                         pixmap,
                         glyph_records,
                         cur_color,
                         cx,
-                        text_xform.pre_concat(Transform::from_row(
-                            glyph_scale,
-                            0.0,
-                            0.0,
-                            glyph_scale,
-                            cur_x,
-                            cur_y,
-                        )),
+                        gxform,
                         mask,
                     );
                 }
@@ -602,22 +657,34 @@ fn render_static_text(
 fn render_edit_text(
     pixmap: &mut Pixmap,
     edit: &EditTextDef,
-    text_str: &str,
-    dict: &BTreeMap<u16, Character>,
+    raw_text_str: &str,
+    ctx: &SceneContext<'_>,
     xform: Transform,
     cx: ColorTransform,
     mask: Option<&Mask>,
 ) {
+    if raw_text_str.is_empty() {
+        return;
+    }
+    let cleaned_owned;
+    let text_str: &str = if edit.html || (raw_text_str.contains('<') && raw_text_str.contains('>'))
+    {
+        cleaned_owned = strip_html_tags(raw_text_str);
+        &cleaned_owned
+    } else {
+        raw_text_str
+    };
     if text_str.is_empty() {
         return;
     }
+
     let height_twips = f32::from(edit.font_height_twips.max(160));
     let mut cur_x = (edit.bounds.x_min + 40) as f32;
-    let baseline_y = (edit.bounds.y_min as f32) + height_twips;
+    let mut baseline_y = (edit.bounds.y_min as f32) + height_twips;
 
     // First try embedded font outlines if available
     if let Some(fid) = edit.font_id {
-        if let Some(Character::Font(font)) = dict.get(&fid) {
+        if let Some(Character::Font(font)) = ctx.dict.get(&fid) {
             if !font.glyphs.is_empty() && !font.codes.is_empty() {
                 let em_square = if font.version >= 3 {
                     20480.0_f32
@@ -626,17 +693,25 @@ fn render_edit_text(
                 };
                 let scale = height_twips / em_square;
                 for ch in text_str.chars() {
+                    if ch == '\n' {
+                        cur_x = (edit.bounds.x_min + 40) as f32;
+                        baseline_y += height_twips * 1.2;
+                        continue;
+                    }
                     let code = ch as u16;
                     if let Some(g_idx) = font.codes.iter().position(|&c| c == code) {
-                        if let Some(glyph_records) = font.glyphs.get(g_idx) {
-                            render_glyph_records(
+                        let gxform = xform.pre_concat(Transform::from_row(
+                            scale, 0.0, 0.0, scale, cur_x, baseline_y,
+                        ));
+                        if let Some(cmds) = ctx.flattened_glyphs.get(&(font.id, g_idx)) {
+                            render_glyph_cmds(pixmap, cmds, edit.color, cx, gxform, mask);
+                        } else if let Some(glyph_records) = font.glyphs.get(g_idx) {
+                            render_glyph_records_fallback(
                                 pixmap,
                                 glyph_records,
                                 edit.color,
                                 cx,
-                                xform.pre_concat(Transform::from_row(
-                                    scale, 0.0, 0.0, scale, cur_x, baseline_y,
-                                )),
+                                gxform,
                                 mask,
                             );
                         }
@@ -664,11 +739,12 @@ fn render_edit_text(
 
     let char_w = height_twips * 0.5;
     let char_h = height_twips * 0.75;
-    let top_y = baseline_y - char_h;
+    let mut top_y = baseline_y - char_h;
 
     for ch in text_str.chars() {
         if ch == '\n' {
             cur_x = (edit.bounds.x_min + 40) as f32;
+            top_y += height_twips * 1.2;
             continue;
         }
         if let Some(path) = builtin_char_path(ch, cur_x, top_y, char_w, char_h) {
@@ -678,7 +754,54 @@ fn render_edit_text(
     }
 }
 
-fn render_glyph_records(
+fn strip_html_tags(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut in_tag = false;
+    let mut tag_buf = String::new();
+    for ch in input.chars() {
+        if ch == '<' {
+            in_tag = true;
+            tag_buf.clear();
+        } else if ch == '>' && in_tag {
+            in_tag = false;
+            let lower = tag_buf.trim().to_ascii_lowercase();
+            if lower.starts_with("br") || lower == "/p" {
+                out.push('\n');
+            }
+        } else if in_tag {
+            tag_buf.push(ch);
+        } else {
+            out.push(ch);
+        }
+    }
+    out.replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&nbsp;", " ")
+}
+
+fn render_glyph_cmds(
+    pixmap: &mut Pixmap,
+    cmds: &[PathCmd],
+    color: Rgba,
+    cx: ColorTransform,
+    xform: Transform,
+    mask: Option<&Mask>,
+) {
+    if let Some(path) = build_skia_path(cmds) {
+        let mut paint = Paint {
+            anti_alias: true,
+            ..Paint::default()
+        };
+        let c = apply_cxform(color, cx);
+        paint.set_color_rgba8(c.r, c.g, c.b, c.a);
+        pixmap.fill_path(&path, &paint, FillRule::EvenOdd, xform, mask);
+    }
+}
+
+fn render_glyph_records_fallback(
     pixmap: &mut Pixmap,
     records: &[ShapeRecord],
     color: Rgba,
@@ -686,26 +809,8 @@ fn render_glyph_records(
     xform: Transform,
     mask: Option<&Mask>,
 ) {
-    let shape = ShapeDef {
-        id: 0,
-        version: 3,
-        bounds: Rect::default(),
-        fill_styles: vec![FillStyle::Solid(color)],
-        line_styles: Vec::new(),
-        records: records.to_vec(),
-    };
-    let flat = flatten_shape(&shape);
-    for fill in &flat.fills {
-        if let Some(path) = build_skia_path(&fill.cmds) {
-            let mut paint = Paint {
-                anti_alias: true,
-                ..Paint::default()
-            };
-            let c = apply_cxform(color, cx);
-            paint.set_color_rgba8(c.r, c.g, c.b, c.a);
-            pixmap.fill_path(&path, &paint, FillRule::EvenOdd, xform, mask);
-        }
-    }
+    let cmds = flatten_glyph_records(records);
+    render_glyph_cmds(pixmap, &cmds, color, cx, xform, mask);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -714,7 +819,7 @@ fn render_button(
     cache: &mut ShapeCache,
     btn: &ButtonDef,
     state: ButtonState,
-    dict: &BTreeMap<u16, Character>,
+    ctx: &SceneContext<'_>,
     parent_xform: Transform,
     parent_cx: ColorTransform,
     mask: Option<&Mask>,
@@ -744,10 +849,11 @@ fn render_button(
             dynamic_text: None,
             sprite_timeline: None,
             clip_actions: Vec::new(),
+            visible: true,
         };
         let child_xform = parent_xform.pre_concat(matrix_to_skia(rec.matrix));
         let child_cx = combine_cxform(parent_cx, rec.color_transform);
-        render_object(pixmap, cache, &dummy_obj, dict, child_xform, child_cx, mask);
+        render_object(pixmap, cache, &dummy_obj, ctx, child_xform, child_cx, mask);
     }
 }
 
@@ -824,7 +930,6 @@ fn decoded_bitmap_to_pixmap(bmp: &DecodedBitmap, cx: ColorTransform) -> Option<P
             },
             cx,
         );
-        // Premultiply for tiny-skia
         let a16 = u16::from(c.a);
         dst_px[0] = ((u16::from(c.r) * a16 + 127) / 255) as u8;
         dst_px[1] = ((u16::from(c.g) * a16 + 127) / 255) as u8;
@@ -850,6 +955,15 @@ fn builtin_char_path(ch: char, x: f32, y: f32, w: f32, h: f32) -> Option<Path> {
             pb.line_to(x, by);
             pb.close();
         }
+        'Q' => {
+            pb.move_to(x, y);
+            pb.line_to(rx, y);
+            pb.line_to(rx, by);
+            pb.line_to(x, by);
+            pb.close();
+            pb.move_to(mx, my);
+            pb.line_to(rx, by);
+        }
         'D' => {
             pb.move_to(x, y);
             pb.line_to(x + w * 0.7, y);
@@ -862,6 +976,12 @@ fn builtin_char_path(ch: char, x: f32, y: f32, w: f32, h: f32) -> Option<Path> {
         '1' | 'I' => {
             pb.move_to(mx, y);
             pb.line_to(mx, by);
+        }
+        'J' => {
+            pb.move_to(rx, y);
+            pb.line_to(rx, by);
+            pb.line_to(x, by);
+            pb.line_to(x, my);
         }
         '2' | 'Z' => {
             pb.move_to(x, y);
@@ -1041,7 +1161,33 @@ fn builtin_char_path(ch: char, x: f32, y: f32, w: f32, h: f32) -> Option<Path> {
             pb.move_to(mx, y);
             pb.line_to(mx, by);
         }
-        ' ' => return None,
+        '=' => {
+            pb.move_to(x, y + h * 0.35);
+            pb.line_to(rx, y + h * 0.35);
+            pb.move_to(x, y + h * 0.65);
+            pb.line_to(rx, y + h * 0.65);
+        }
+        ':' => {
+            pb.move_to(mx, y + h * 0.25);
+            pb.line_to(mx, y + h * 0.35);
+            pb.move_to(mx, y + h * 0.65);
+            pb.line_to(mx, y + h * 0.75);
+        }
+        '.' | ',' => {
+            pb.move_to(mx, y + h * 0.85);
+            pb.line_to(mx, by);
+        }
+        '!' => {
+            pb.move_to(mx, y);
+            pb.line_to(mx, y + h * 0.7);
+            pb.move_to(mx, y + h * 0.9);
+            pb.line_to(mx, by);
+        }
+        '/' | '%' => {
+            pb.move_to(x, by);
+            pb.line_to(rx, y);
+        }
+        ' ' | '\r' | '\t' => return None,
         _ => {
             pb.move_to(x, y);
             pb.line_to(rx, y);

@@ -864,6 +864,8 @@ pub enum Tag {
 pub struct Movie {
     /// Movie header.
     pub header: Header,
+    /// Declared uncompressed SWF file length in bytes (from the 8-byte preamble).
+    pub decompressed_len: u32,
     /// Top-level tags in stream order.
     pub tags: Vec<Tag>,
 }
@@ -1002,7 +1004,11 @@ impl Movie {
         };
 
         let tags = parse_tag_stream(&mut reader, version, limits)?;
-        Ok(Self { header, tags })
+        Ok(Self {
+            header,
+            decompressed_len: u32::try_from(file_len).unwrap_or(u32::MAX),
+            tags,
+        })
     }
 }
 
@@ -1032,7 +1038,16 @@ fn parse_tag_stream(
             offset: tag_offset,
             kind: ParseErrorKind::UnexpectedEof,
         })?;
-        let tag = decode_tag(code, payload, swf_version, limits, tag_offset)?;
+        let tag = match decode_tag(code, payload, swf_version, limits, tag_offset) {
+            Ok(t) => t,
+            Err(e) if matches!(e.kind, ParseErrorKind::LimitExceeded(_)) || code == 77 => {
+                return Err(e);
+            }
+            Err(_) => Tag::Unknown {
+                code,
+                raw: payload.to_vec(),
+            },
+        };
         let is_end = tag == Tag::End;
         tags.push(tag);
         if is_end {
@@ -1929,6 +1944,34 @@ fn decode_morph_shape(
     })
 }
 
+fn skip_filter_list(r: &mut Reader<'_>) -> Result<(), ParseError> {
+    let count = usize::from(r.u8()?);
+    for _ in 0..count {
+        let filter_id = r.u8()?;
+        let skip_bytes = match filter_id {
+            0 => 23, // DropShadowFilter
+            1 => 9,  // BlurFilter
+            2 => 15, // GlowFilter
+            3 => 27, // BevelFilter
+            4 | 7 => {
+                // GradientGlowFilter / GradientBevelFilter
+                let num_colors = usize::from(r.u8()?);
+                num_colors.saturating_mul(5).saturating_add(19)
+            }
+            5 => {
+                // ConvolutionFilter
+                let mx = usize::from(r.u8()?);
+                let my = usize::from(r.u8()?);
+                mx.saturating_mul(my).saturating_mul(4).saturating_add(13)
+            }
+            6 => 80, // ColorMatrixFilter (20 * f32)
+            _ => return Ok(()),
+        };
+        let _ = r.bytes(skip_bytes)?;
+    }
+    Ok(())
+}
+
 fn decode_place_object2(r: &mut Reader<'_>, is_v3: bool) -> Result<PlaceObject2Tag, ParseError> {
     let has_clip_actions = r.ubits(1)? != 0;
     let has_clip_depth = r.ubits(1)? != 0;
@@ -1941,15 +1984,20 @@ fn decode_place_object2(r: &mut Reader<'_>, is_v3: bool) -> Result<PlaceObject2T
 
     let mut has_class_name = false;
     let mut has_image = false;
+    let mut has_opaque_bg = false;
+    let mut has_visible = false;
+    let mut has_cache_as_bitmap = false;
+    let mut has_blend_mode = false;
+    let mut has_filter_list = false;
     if is_v3 {
         let _reserved = r.ubits(1)?;
-        let _has_opaque_bg = r.ubits(1)? != 0;
-        let _has_visible = r.ubits(1)? != 0;
+        has_opaque_bg = r.ubits(1)? != 0;
+        has_visible = r.ubits(1)? != 0;
         has_image = r.ubits(1)? != 0;
         has_class_name = r.ubits(1)? != 0;
-        let _has_cache_as_bitmap = r.ubits(1)? != 0;
-        let _has_blend_mode = r.ubits(1)? != 0;
-        let _has_filter_list = r.ubits(1)? != 0;
+        has_cache_as_bitmap = r.ubits(1)? != 0;
+        has_blend_mode = r.ubits(1)? != 0;
+        has_filter_list = r.ubits(1)? != 0;
     }
 
     let depth = r.u16()?;
@@ -1966,7 +2014,24 @@ fn decode_place_object2(r: &mut Reader<'_>, is_v3: bool) -> Result<PlaceObject2T
     let ratio = if has_ratio { Some(r.u16()?) } else { None };
     let name = if has_name { Some(r.string()?) } else { None };
     let clip_depth = if has_clip_depth { Some(r.u16()?) } else { None };
-    let clip_actions_raw = if has_clip_actions || !r.is_empty() {
+    if is_v3 {
+        if has_filter_list {
+            let _ = skip_filter_list(r);
+        }
+        if has_blend_mode && !r.is_empty() {
+            let _blend = r.u8()?;
+        }
+        if has_cache_as_bitmap && !r.is_empty() {
+            let _cache = r.u8()?;
+        }
+        if has_visible && !r.is_empty() {
+            let _vis = r.u8()?;
+        }
+        if has_opaque_bg && r.remaining() >= 4 {
+            let _bg = read_rgba(r, true)?;
+        }
+    }
+    let clip_actions_raw = if has_clip_actions || (!is_v3 && !r.is_empty()) {
         let rem = r.remaining();
         if rem > 0 {
             Some(r.bytes(rem)?.to_vec())
@@ -2045,19 +2110,35 @@ fn decode_font(
         });
     }
 
-    for _ in 0..=num_glyphs {
+    let offset_table_start = r.position();
+    for _ in 0..num_glyphs {
         if wide_offsets {
             let _off = r.u32()?;
         } else {
             let _off = r.u16()?;
         }
     }
+    let code_table_offset = if wide_offsets {
+        usize::try_from(r.u32()?).unwrap_or(0)
+    } else {
+        usize::from(r.u16()?)
+    };
     let mut glyphs = Vec::with_capacity(num_glyphs.min(256));
     for _ in 0..num_glyphs {
         glyphs.push(decode_shape_records(r, 1, limits, tag_offset)?);
     }
+    let expected_code_pos = offset_table_start.saturating_add(code_table_offset);
+    if code_table_offset > 0 && expected_code_pos > r.position() {
+        let skip = expected_code_pos.saturating_sub(r.position());
+        if skip <= r.remaining() {
+            let _ = r.bytes(skip);
+        }
+    }
     let mut codes = Vec::with_capacity(num_glyphs.min(256));
     for _ in 0..num_glyphs {
+        if r.is_empty() {
+            break;
+        }
         if wide_codes {
             codes.push(r.u16()?);
         } else {
@@ -2258,11 +2339,7 @@ fn decode_button(r: &mut Reader<'_>, version: u8) -> Result<ButtonDef, ParseErro
             ColorTransform::identity()
         };
         if version >= 2 && has_filter_list {
-            let filter_count = r.u8()?;
-            if filter_count > 0 {
-                // Filters are out of scope in v1.
-                break;
-            }
+            skip_filter_list(r)?;
         }
         if version >= 2 && has_blend_mode {
             let _blend = r.u8()?;
