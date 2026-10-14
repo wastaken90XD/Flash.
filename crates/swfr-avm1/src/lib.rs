@@ -10,7 +10,7 @@
 )]
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::rc::Rc;
+use std::sync::Arc;
 use swfr_reader::Reader;
 use swfr_scene::Stage;
 
@@ -1048,7 +1048,7 @@ pub struct Avm1 {
     /// Registers `r0..r255` (supporting both SWF 5 `ActionStoreRegister` and SWF 7 `DefineFunction2`).
     pub registers: Vec<Value>,
     /// Decoded bytecode cache keyed by `(len, fnv1a_hash)`.
-    ops_cache: BTreeMap<(usize, u64), Rc<[Op]>>,
+    ops_cache: BTreeMap<(usize, u64), Arc<[Op]>>,
     /// Accumulated `trace()` output lines.
     pub trace_log: Vec<String>,
     /// Maximum instructions executed per action block before the watchdog aborts (default `500_000`).
@@ -1453,7 +1453,7 @@ impl Avm1 {
         ((x >> 11) as f64) / ((1_u64 << 53) as f64)
     }
 
-    fn cached_decode_ops(&mut self, bytecode: &[u8]) -> Rc<[Op]> {
+    fn cached_decode_ops(&mut self, bytecode: &[u8]) -> Arc<[Op]> {
         let mut h: u64 = 0xcbf2_9ce4_8422_2325;
         for &b in bytecode {
             h ^= u64::from(b);
@@ -1461,11 +1461,11 @@ impl Avm1 {
         }
         let key = (bytecode.len(), h);
         if let Some(cached) = self.ops_cache.get(&key) {
-            return Rc::clone(cached);
+            return Arc::clone(cached);
         }
-        let rc: Rc<[Op]> = Rc::from(decode_ops(bytecode));
+        let rc: Arc<[Op]> = Arc::from(decode_ops(bytecode));
         if self.ops_cache.len() < 2048 {
-            self.ops_cache.insert(key, Rc::clone(&rc));
+            self.ops_cache.insert(key, Arc::clone(&rc));
         }
         rc
     }

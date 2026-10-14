@@ -8,7 +8,7 @@
 )]
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
+use std::sync::Arc;
 use swfr_reader::{ColorTransform, Matrix, Rect};
 use swfr_scene::{
     flatten_morph_shape, flatten_shape, ButtonState, Character, DecodedBitmap, DisplayObject,
@@ -56,7 +56,7 @@ struct LruEntry {
     key: (u16, u16),
     last_used: u64,
     shape: FlattenedShape,
-    compiled: Rc<CompiledShape>,
+    compiled: Arc<CompiledShape>,
 }
 
 /// Bounded LRU cache mapping `(character_id, ratio)` to [`FlattenedShape`] and pre-built `tiny_skia` paths,
@@ -64,7 +64,7 @@ struct LruEntry {
 #[derive(Debug, Clone, Default)]
 pub struct ShapeCache {
     entries: Vec<LruEntry>,
-    glyph_paths: BTreeMap<(u16, u32), Rc<Vec<Path>>>,
+    glyph_paths: BTreeMap<(u16, u32), Arc<Vec<Path>>>,
     bitmap_pixmaps: BTreeMap<u16, Pixmap>,
     clock: u64,
 }
@@ -93,12 +93,12 @@ impl ShapeCache {
     }
 
     #[allow(clippy::indexing_slicing)]
-    fn get_or_insert_compiled<F>(&mut self, key: (u16, u16), compute: F) -> Rc<CompiledShape>
+    fn get_or_insert_compiled<F>(&mut self, key: (u16, u16), compute: F) -> Arc<CompiledShape>
     where
         F: FnOnce() -> FlattenedShape,
     {
         let idx = self.ensure_entry(key, compute);
-        Rc::clone(&self.entries[idx].compiled)
+        Arc::clone(&self.entries[idx].compiled)
     }
 
     #[allow(clippy::indexing_slicing)]
@@ -115,7 +115,7 @@ impl ShapeCache {
             return pos;
         }
         let shape = compute();
-        let compiled = Rc::new(CompiledShape::from_flattened(&shape));
+        let compiled = Arc::new(CompiledShape::from_flattened(&shape));
         if self.entries.len() >= SHAPE_LRU_CAPACITY {
             if let Some((oldest_idx, _)) = self
                 .entries
@@ -140,9 +140,9 @@ impl ShapeCache {
         font_id: u16,
         glyph_idx: u32,
         records: &[ShapeRecord],
-    ) -> Rc<Vec<Path>> {
+    ) -> Arc<Vec<Path>> {
         if let Some(existing) = self.glyph_paths.get(&(font_id, glyph_idx)) {
-            return Rc::clone(existing);
+            return Arc::clone(existing);
         }
         let shape = ShapeDef {
             id: 0,
@@ -159,10 +159,10 @@ impl ShapeCache {
                 paths.push(p);
             }
         }
-        let rc = Rc::new(paths);
+        let rc = Arc::new(paths);
         if self.glyph_paths.len() < SHAPE_LRU_CAPACITY {
             self.glyph_paths
-                .insert((font_id, glyph_idx), Rc::clone(&rc));
+                .insert((font_id, glyph_idx), Arc::clone(&rc));
         }
         rc
     }
