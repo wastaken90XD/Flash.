@@ -1037,7 +1037,7 @@ fn parse_tag_stream(
             Err(e) if matches!(e.kind, ParseErrorKind::LimitExceeded(_)) => return Err(e),
             Err(_) => Tag::Unknown {
                 code,
-                data: payload.to_vec(),
+                raw: payload.to_vec(),
             },
         };
         let is_end = tag == Tag::End;

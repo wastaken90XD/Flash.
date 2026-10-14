@@ -1250,13 +1250,13 @@ impl Avm1 {
     /// `16`, `17`) so SWF movies checking either `retro_key` or Flash virtual keycodes work.
     pub fn set_key_state(&mut self, key_code: u32, down: bool) {
         let flash_alias = match key_code {
-            273 => Some(38),                     // RETROK_UP -> Key.UP
-            274 => Some(40),                     // RETROK_DOWN -> Key.DOWN
-            275 => Some(39),                     // RETROK_RIGHT -> Key.RIGHT
-            276 => Some(37),                     // RETROK_LEFT -> Key.LEFT
-            97..=122 => Some(key_code - 32),     // RETROK_a..z -> 'A'..'Z'
-            303 | 304 => Some(16),               // RETROK_RSHIFT/LSHIFT -> Key.SHIFT
-            305 | 306 => Some(17),               // RETROK_RCTRL/LCTRL -> Key.CONTROL
+            273 => Some(38),
+            274 => Some(40),
+            275 => Some(39),
+            276 => Some(37),
+            97..=122 => Some(key_code - 32),
+            303 | 304 => Some(16),
+            305 | 306 => Some(17),
             _ => None,
         };
         if down {
