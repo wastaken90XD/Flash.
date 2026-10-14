@@ -77,3 +77,27 @@ Every tag code defined in SWF specification v19 either has a programmatic `SwfBu
 | `90` | `DefineBitsJPEG4` | **Supported (`Tag::DefineBitsJPEG4`)** | `tag_roundtrip::roundtrip_all_supported_swf_v19_tags` |
 | `91` | `DefineFont4` | `Tag::Unknown { code: 91, .. }` | Flash Text Engine (FTE) CFF font container for AS3/AVM2 (deferred to M7). |
 | `93` | `EnableTelemetry` | `Tag::Unknown { code: 93, .. }` | Adobe Scout profiler telemetry tag; non-goal in v1, preserved as `Tag::Unknown`. |
+
+---
+
+## 2. TSD 4.6 Hard-Areas Checklist Coverage & Test Matrix (`TSD 4.7.2`)
+
+Every item from **TSD 4.6 (`Hard-areas checklist`)** is mapped below to its proving test(s) (for items in M1–M5) or its explicit documentation entry in `docs/KNOWN_LIMITATIONS.md`.
+
+| # | TSD 4.6 Hard Area | Scope / Milestone | Proving Test (`#[test]`) or `docs/KNOWN_LIMITATIONS.md` Entry |
+| :--- | :--- | :--- | :--- |
+| 1 | SWF 1 and 2 files, with `PlaceObject` (tag 4) and `RemoveObject` (tag 5) instead of the later tags | M1–M3 | `e2e_hard_area_swf1_swf2_morph_mixed_fills_nellymoser_speex_and_skipped_frames_via_abi`, `roundtrip_all_supported_swf_v19_tags` |
+| 2 | Morph shapes (`DefineMorphShape`/`2`), including solid, gradient, bitmap, and mixed fill types | M1–M2 | `e2e_hard_area_swf1_swf2_morph_mixed_fills_nellymoser_speex_and_skipped_frames_via_abi`, `e2e_m2_gradients_morphs_and_sprites_via_abi`, `render_m2_lossless_bitmap_clip_mask_and_morph` |
+| 3 | ADPCM at every bit depth (2/3/4/5-bit); Nellymoser and Speex out of scope: log warning and play silence | M5 | `adpcm_2_3_4_5_bit_decodes_cleanly`, `e2e_hard_area_swf1_swf2_morph_mixed_fills_nellymoser_speex_and_skipped_frames_via_abi`, and `docs/KNOWN_LIMITATIONS.md` |
+| 4 | Bitmap smoothing (`0x40`/`0x41` bilinear filtering) exists only from SWF 8 (`swf_version >= 8`) | M2 | `e2e_hard_area_swf1_swf2_morph_mixed_fills_nellymoser_speex_and_skipped_frames_via_abi` |
+| 5 | `DefineScalingGrid` (tag 78, nine-slice scaling) | M1 / v1 limitation | Parsed and round-tripped in `roundtrip_all_supported_swf_v19_tags`; nine-slice layout scaling documented in `docs/KNOWN_LIMITATIONS.md` |
+| 6 | Blend modes (`PlaceObject3`), including `erase` | M2 / v1 limitation | Parsed in `PlaceObject3`; non-normal blend modes (including `erase`) documented in `docs/KNOWN_LIMITATIONS.md` |
+| 7 | Script order: root timeline vs child clips, playhead changes made by a script (`gotoAndStop`/`gotoAndPlay`), clip constructors before first use, and skipped frames must never run their frame scripts | M3–M4 | `e2e_hard_area_event_order_load_unload_button_mouse_key_via_abi`, `e2e_hard_area_swf1_swf2_morph_mixed_fills_nellymoser_speex_and_skipped_frames_via_abi`, `e2e_real_corpus_manifest_runs_120_frames_without_m0_stub` |
+| 8 | AVM1 details: local variable scoping, prototype and class chains, cloning movie clips (`CloneSprite` / `duplicateMovieClip`), `goto` by label, and tracing GC to avoid reference-counting cycles | M4 | `avm1_es3_conformance_160_generated_movies`, `avm1_timers_key_and_gc_work_deterministically`, `e2e_hard_area_swf1_swf2_morph_mixed_fills_nellymoser_speex_and_skipped_frames_via_abi`, `e2e_real_corpus_manifest_runs_120_frames_without_m0_stub` |
+| 9 | Mixed AVM1 and AVM2 files and obfuscated AVM1 bytecode (out-of-bounds jumps clamped cleanly) | M4–M5 | `e2e_m5_avm2_diagnostic_notice_and_reset_via_abi`, `avm1_watchdog_aborts_infinite_loop_cleanly`, `mutator_100k_iterations_never_panics`, and `docs/KNOWN_LIMITATIONS.md` |
+| 10 | AS1/AS2 event order: button, mouse, and key handlers run immediately when their event happens; `load` runs in the first frame the clip is on stage after parent timeline's code and before the clip's own code and before rendering; `unload` runs in the first frame the clip is gone before parent timeline's code | M3–M4 | `e2e_hard_area_event_order_load_unload_button_mouse_key_via_abi`, `e2e_real_corpus_manifest_runs_120_frames_without_m0_stub` (`ruffle-clip-events.swf`), and `DECISIONS.md` (`D-009`) |
+| 11 | AS3-era frame loop ("elastic racetrack": events -> `enterFrame` -> render) | M7 (out of v1 scope) | Documented in `docs/KNOWN_LIMITATIONS.md` and `docs/notes/prior-art.md` |
+| 12 | Streaming sound sync (`SoundStreamHead`/`2` + `SoundStreamBlock`) and ActionScript `Sound` object | M4–M5 | `stream_sync_300_frames_marker_pulse_within_one_frame`, `e2e_m4_savestate_roundtrip_and_streaming_audio_via_abi`, `e2e_real_corpus_manifest_runs_120_frames_without_m0_stub` (`ruffle-sound.swf`) |
+| 13 | Collector pauses on weak CPUs (bounded generational arena mark-and-sweep GC) | M4 / M6 | `avm1_timers_key_and_gc_work_deterministically`, `harness_formats_full_movie_info_and_runs_honest_bench`, and `docs/KNOWN_LIMITATIONS.md` |
+| 14 | Version-gated behavior: string encoding (SWF <= 5 Latin-1/Shift-JIS fallback vs SWF >= 6 UTF-8) and case sensitivity / `undefined` coercion (SWF <= 6 vs SWF >= 7) | M1 / M4 | `rect_matrix_cxform_and_string_parsing`, `avm1_es3_conformance_160_generated_movies` |
+

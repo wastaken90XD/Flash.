@@ -944,12 +944,92 @@ fn encode_morph_shape(w: &mut BitWriter, morph: &MorphShapeDef) {
         .min(morph.end_fill_styles.len());
     body.write_u8(u8::try_from(fill_count).unwrap_or(0));
     for i in 0..fill_count {
-        if let (Some(FillStyle::Solid(sc)), Some(FillStyle::Solid(ec))) =
-            (morph.start_fill_styles.get(i), morph.end_fill_styles.get(i))
-        {
-            body.write_u8(0x00);
-            write_rgba(&mut body, *sc, true);
-            write_rgba(&mut body, *ec, true);
+        match (morph.start_fill_styles.get(i), morph.end_fill_styles.get(i)) {
+            (Some(FillStyle::Solid(sc)), Some(FillStyle::Solid(ec))) => {
+                body.write_u8(0x00);
+                write_rgba(&mut body, *sc, true);
+                write_rgba(&mut body, *ec, true);
+            }
+            (
+                Some(FillStyle::LinearGradient {
+                    matrix: sm,
+                    stops: ss,
+                }),
+                Some(FillStyle::LinearGradient {
+                    matrix: em,
+                    stops: es,
+                }),
+            ) => {
+                body.write_u8(0x10);
+                body.write_matrix(*sm);
+                body.write_matrix(*em);
+                let nstops = ss.len().min(es.len());
+                body.write_u8(u8::try_from(nstops).unwrap_or(0));
+                for j in 0..nstops {
+                    if let (Some(st), Some(et)) = (ss.get(j), es.get(j)) {
+                        body.write_u8(st.ratio);
+                        write_rgba(&mut body, st.color, true);
+                        body.write_u8(et.ratio);
+                        write_rgba(&mut body, et.color, true);
+                    }
+                }
+            }
+            (
+                Some(FillStyle::RadialGradient {
+                    matrix: sm,
+                    stops: ss,
+                    focal_point_q8: sf,
+                }),
+                Some(FillStyle::RadialGradient {
+                    matrix: em,
+                    stops: es,
+                    focal_point_q8: ef,
+                }),
+            ) => {
+                let stype = if *sf != 0 || *ef != 0 { 0x13 } else { 0x12 };
+                body.write_u8(stype);
+                body.write_matrix(*sm);
+                body.write_matrix(*em);
+                let nstops = ss.len().min(es.len());
+                body.write_u8(u8::try_from(nstops).unwrap_or(0));
+                for j in 0..nstops {
+                    if let (Some(st), Some(et)) = (ss.get(j), es.get(j)) {
+                        body.write_u8(st.ratio);
+                        write_rgba(&mut body, st.color, true);
+                        body.write_u8(et.ratio);
+                        write_rgba(&mut body, et.color, true);
+                    }
+                }
+                if stype == 0x13 {
+                    body.write_i16(*sf);
+                    body.write_i16(*ef);
+                }
+            }
+            (
+                Some(FillStyle::Bitmap {
+                    bitmap_id,
+                    matrix: sm,
+                    repeating,
+                    smoothed,
+                }),
+                Some(FillStyle::Bitmap { matrix: em, .. }),
+            ) => {
+                let stype = match (*repeating, *smoothed) {
+                    (true, true) => 0x40,
+                    (false, true) => 0x41,
+                    (true, false) => 0x42,
+                    (false, false) => 0x43,
+                };
+                body.write_u8(stype);
+                body.write_u16(*bitmap_id);
+                body.write_matrix(*sm);
+                body.write_matrix(*em);
+            }
+            _ => {
+                body.write_u8(0x00);
+                write_rgba(&mut body, Rgba::rgb(0, 0, 0), true);
+                write_rgba(&mut body, Rgba::rgb(0, 0, 0), true);
+            }
         }
     }
     let line_count = morph
@@ -1825,4 +1905,36 @@ pub fn verify_or_create_golden(
     }
 
     Err(format!("missing golden image for {name}"))
+}
+
+/// Encodes a slice of `(event_flags, action_bytes)` pairs into a `PlaceObject2` `CLIPACTIONS`
+/// payload for `swf_version`.
+#[must_use]
+pub fn encode_clip_actions(swf_version: u8, records: &[(u32, Vec<u8>)]) -> Vec<u8> {
+    let mut w = BitWriter::new();
+    w.write_u16(0); // Reserved
+    let mut all_flags: u32 = 0;
+    for &(f, _) in records {
+        all_flags |= f;
+    }
+    if swf_version >= 6 {
+        w.write_u32(all_flags);
+    } else {
+        w.write_u16(u16::try_from(all_flags & 0xFFFF).unwrap_or(0));
+    }
+    for &(flags, ref act) in records {
+        if swf_version >= 6 {
+            w.write_u32(flags);
+        } else {
+            w.write_u16(u16::try_from(flags & 0xFFFF).unwrap_or(0));
+        }
+        w.write_u32(u32::try_from(act.len()).unwrap_or(0));
+        w.write_bytes(act);
+    }
+    if swf_version >= 6 {
+        w.write_u32(0); // ClipActionEndFlag
+    } else {
+        w.write_u16(0);
+    }
+    w.into_bytes()
 }

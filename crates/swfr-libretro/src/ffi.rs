@@ -553,6 +553,20 @@ pub fn install_log_callback_in_environment(data: *mut c_void, cb: RetroLogPrintf
     true
 }
 
+/// Extracts the `retro_keyboard_event_t` callback from the `data` pointer passed to
+/// `RETRO_ENVIRONMENT_SET_KEYBOARD_CALLBACK` so mock frontends can deliver keyboard events.
+#[must_use]
+pub fn extract_keyboard_callback_from_environment(
+    data: *mut c_void,
+) -> Option<RetroKeyboardEventFn> {
+    if data.is_null() {
+        return None;
+    }
+    // SAFETY: When `cmd == RETRO_ENVIRONMENT_SET_KEYBOARD_CALLBACK`, `data` points to a `retro_keyboard_callback`.
+    let kb = unsafe { &*data.cast::<retro_keyboard_callback>() };
+    kb.callback
+}
+
 /// Converts a NUL-terminated C string pointer from a callback into an owned `String`.
 #[must_use]
 pub fn copy_c_str_from_callback_ptr(ptr: *const c_char) -> String {

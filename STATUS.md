@@ -1,6 +1,6 @@
 # `swfr` Autonomous Run Status
 
-- **Current Milestone:** All milestones (`M0`–`M6`) complete and re-audited under **TSD Part 3.14 (`End-to-end acceptance`)**
+- **Current Milestone:** All milestones (`M0`–`M6`) complete and verified under **TSD Part 3.14 (`End-to-end acceptance`)** and **TSD Part 4 (`Prior art and research notes`, `4.1`–`4.8`)**
 - **Overall Run Status:** `engineering-complete`
 - **Active Branch / PR:** [`arena/a4bfe02a-flash`](https://github.com/wastaken90XD/Flash./tree/arena/a4bfe02a-flash) ([PR #1](https://github.com/wastaken90XD/Flash./pull/1))
 - **Latest Passing CI Runs:**
@@ -42,5 +42,20 @@
 | **M2** — Static Display List, Vector & Bitmap Software Renderer | `complete` | [`docs/audits/m2.md`](docs/audits/m2.md) | [Run #38486527709](https://github.com/wastaken90XD/Flash./actions/runs/38486527709) | [#4 (V2)](https://github.com/wastaken90XD/Flash./issues/4) |
 | **M3** — Multi-Frame Timelines, Sprites, Buttons, Text & Input | `complete` | [`docs/audits/m3.md`](docs/audits/m3.md) | [Run #38486527709](https://github.com/wastaken90XD/Flash./actions/runs/38486527709) | [#5 (V3)](https://github.com/wastaken90XD/Flash./issues/5), [#6 (V4)](https://github.com/wastaken90XD/Flash./issues/6) |
 | **M4** — ActionScript 1.0 & 2.0 (AVM1) Virtual Machine | `complete` | [`docs/audits/m4.md`](docs/audits/m4.md) | [Run #38486527709](https://github.com/wastaken90XD/Flash./actions/runs/38486527709) | [#7 (V5)](https://github.com/wastaken90XD/Flash./issues/7) |
-| **M5** — Audio Subsystem, SharedObject SAVE_RAM & Polish | `complete` | [`docs/audits/m5.md`](docs/audits/m5.md) | [Run #38486527709](https://github.com/wastaken90XD/Flash./actions/runs/38486527709) | [#8 (V6)](https://github.com/wastaken90XD/Flash./issues/8) |
-| **M6** — Cross-Platform Packaging, Real-Corpus CI & Benchmarks | `complete` | [`docs/audits/m6.md`](docs/audits/m6.md) | [Run #38486527709](https://github.com/wastaken90XD/Flash./actions/runs/38486527709) | [#9 (V7)](https://github.com/wastaken90XD/Flash./issues/9) |
+| **M5** — Audio Subsystem, SharedObject SAVE_RAM & Polish | `complete` | [`docs/audits/m5.md`](docs/audits/m5.md) | [Run #38487523621](https://github.com/wastaken90XD/Flash./actions/runs/38487523621) | [#8 (V6)](https://github.com/wastaken90XD/Flash./issues/8) |
+| **M6** — Cross-Platform Packaging, Real-Corpus CI & Benchmarks | `complete` | [`docs/audits/m6.md`](docs/audits/m6.md) | [Run #38487523621](https://github.com/wastaken90XD/Flash./actions/runs/38487523621) | [#9 (V7)](https://github.com/wastaken90XD/Flash./issues/9) |
+
+---
+
+## TSD Part 4 (`4.1`–`4.8`) Prior Art & Hard-Areas Verification Table
+
+| # | TSD 4.7 Action / 4.6 Requirement | Artifact / Proving Test(s) (`#[test]` identifier) | Status |
+| :--- | :--- | :--- | :--- |
+| 1 | **TSD 4.7.1:** Save Part 4 as `docs/notes/prior-art.md` | [`docs/notes/prior-art.md`](docs/notes/prior-art.md) | PASS |
+| 2 | **TSD 4.7.2 & 4.6 (1–14):** Add the 14 hard-area items to `docs/notes/tag-coverage.md` and `docs/KNOWN_LIMITATIONS.md`, and write tests for every item fitting M1–M5 (SWF 1/2 `PlaceObject`/`RemoveObject`, morph mixed fills, ADPCM 2/3/4/5-bit + Nellymoser/Speex warning+silence, SWF 8 bitmap smoothing gate, `DefineScalingGrid`, blend modes incl. `erase`, skipped frame scripts on `gotoAndStop`/`gotoAndPlay`, AVM1 scoping/prototypes/cloning/`goto` by label, obfuscated AVM1 bytecode, streaming sound sync + `Sound` object, SWF6 vs SWF7 case sensitivity) | [`docs/notes/tag-coverage.md`](docs/notes/tag-coverage.md), [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md), `e2e_hard_area_swf1_swf2_morph_mixed_fills_nellymoser_speex_and_skipped_frames_via_abi`, `e2e_hard_area_event_order_load_unload_button_mouse_key_via_abi` (`crates/swfr-libretro/tests/e2e.rs`) | PASS |
+| 3 | **TSD 4.7.3 & 4.6.10:** Write event-order tests for item 10 (`load` after parent timeline code and before clip's own code and before rendering; `unload` in first frame clip is gone before parent timeline code; button, mouse, and key handlers run immediately when their event happens) and record result in `DECISIONS.md` | `e2e_hard_area_event_order_load_unload_button_mouse_key_via_abi` (`crates/swfr-libretro/tests/e2e.rs`), [`DECISIONS.md` (`D-010`, `D-011`)](DECISIONS.md) | PASS |
+| 4 | **TSD 4.7.4 & 4.4:** Add `expectation = "verified"` or `"derived"` to every conformance test's meta, and show both counts in `ci-report` (`verified = 0`, `derived = 160`) | `avm1_es3_conformance_160_generated_movies` (`crates/swfr-avm1/tests/conformance.rs`), `.github/workflows/ci.yml` (`ci-report`) | PASS |
+| 5 | **TSD 4.7.5 & 4.5:** Add optional `ffdec-crosscheck` job (`continue-on-error: true`) when Java is available on the runner to compare tag sequences and report mismatches without failing the build | `.github/workflows/ci.yml` (`ffdec-crosscheck`) | PASS |
+| 6 | **TSD 4.7.6:** Open a `[question]` issue asking the owner to decide on the `corpus-ext` job and the Ruffle `swf` test oracle, and continue without them | `.github/workflows/ci.yml` (`ci-report` idempotent `[question]` issue creation) | PASS |
+| 7 | **TSD 4.7.7:** Check the public issues of `ruffle_libretro` for input, audio, and timing problems, and add relevant items to `docs/KNOWN_LIMITATIONS.md` | [`docs/KNOWN_LIMITATIONS.md` Section 12](docs/KNOWN_LIMITATIONS.md) | PASS |
+

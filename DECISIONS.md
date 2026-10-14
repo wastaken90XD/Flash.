@@ -44,3 +44,18 @@
 - **Date:** 2026-10-13
 - **Context:** TSD 2.8 and 3.6 M5 require streaming audio (`SoundStreamHead` + `SoundStreamBlock`) to remain synchronized with the video playhead within 1 frame over a 300-frame run.
 - **Decision:** In `AudioMixer::push_stream_block`, each decoded stream block is resampled to 44,100 Hz stereo, padded to `target_frames_per_step` if short, and trimmed if the FIFO exceeds `2 * target_frames_per_step`, guaranteeing zero cumulative drift and `<= 1` frame peak alignment in the 300-frame marker-pulse sync test.
+
+## D-010: AS1/AS2 Clip Event & Frame Script Ordering (`swfr-scene` & `swfr-avm1` — TSD 4.6 items 7 & 10, 4.7 item 3)
+- **Date:** 2026-10-14
+- **Context:** TSD 4.6 items 7 & 10 and 4.7 item 3 require verifying and testing exact AS1/AS2 event and script execution order:
+  1. Button, mouse (`onClipEvent(mouseDown/mouseUp/mouseMove)`), and key (`onClipEvent(keyDown/keyUp/keyPress)`) handlers run immediately when their event happens.
+  2. The `load` handler (`onClipEvent(load)`) runs in the first frame the clip is on stage, **after** the parent timeline's code and **before** the clip's own frame-0 code and **before** rendering.
+  3. The `unload` handler (`onClipEvent(unload)`) runs in the first frame the clip is gone, **before** the parent timeline's code.
+  4. When a script changes the playhead (`gotoAndStop`/`gotoAndPlay`), intermediate frames that were skipped over must never run their frame scripts, and invalid frame numbers (`<= 0` or `NaN`) are ignored.
+- **Decision & Test Result:** Updated `execute_timeline_frame_tags` and `step_timeline_one_frame` in `crates/swfr-scene/src/lib.rs` to partition per-frame actions into `pre_parent_actions` (`unload` of removed clips, `initialize`/`construct` of newly placed clips), `enter_frame_actions` (surviving pre-existing clips' `enterFrame`), `parent_actions` (parent timeline `DoInitAction`/`DoAction`), and `post_parent_actions` (newly placed clips' `load` handler followed by their own frame-0 `DoAction`), all executing prior to `Renderer::render_stage`. Updated `Avm1::queue_goto_frame` to queue target-frame scripts only when `new_frame != prev_frame` while suppressing intermediate frame actions in `seek_timeline`. Verified in `e2e_hard_area_event_order_load_unload_button_mouse_key_via_abi` and `e2e_hard_area_swf1_swf2_morph_mixed_fills_nellymoser_speex_and_skipped_frames_via_abi` (`crates/swfr-libretro/tests/e2e.rs`).
+
+## D-011: Prior-Art Decisions — SWF 8 Bitmap Smoothing Gate & Conformance `expectation` Metadata (TSD Part 4)
+- **Date:** 2026-10-14
+- **Context:** TSD Part 4 (intro rule 5, 4.4, 4.6 items 3 & 4, and 4.7 items 4–6) notes that bitmap smoothing (`0x40`/`0x41`) only exists from SWF 8, Nellymoser/Speex should log a warning and play silence, and every conformance test's metadata must declare `expectation = "verified"` (from real Flash Player output) or `"derived"` (from ES3 reasoning) with counts shown in `ci-report`.
+- **Decision:** Gate bitmap bilinear filtering on `swf_version >= 8` in `Stage::register_definitions` (`crates/swfr-scene/src/lib.rs`); log a warning once per load when Nellymoser or Speex audio tags are encountered while outputting silence (`crates/swfr-player/src/lib.rs`); and annotate all 160 generated conformance cases in `crates/swfr-avm1/tests/conformance.rs` with `expectation = "derived"` (`verified = 0, derived = 160`) and report both counts in `ci-report`.
+

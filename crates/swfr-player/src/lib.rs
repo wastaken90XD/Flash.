@@ -577,9 +577,48 @@ impl Player {
                         message: "[swfr] Notice: AVM2 (ActionScript 3 / DoABC) movie detected; AVM2 bytecode is not executed in v1, rendering vector timeline.".to_owned(),
                     });
                 }
+                for tag in &rt.movie.tags {
+                    match tag {
+                        Tag::DefineSound(snd)
+                            if matches!(
+                                snd.format,
+                                swfr_swf::SoundFormat::Nellymoser16k
+                                    | swfr_swf::SoundFormat::Nellymoser8k
+                                    | swfr_swf::SoundFormat::Nellymoser
+                                    | swfr_swf::SoundFormat::Speex
+                            ) =>
+                        {
+                            self.logs.push(LogLine {
+                                level: LogLevel::Warn,
+                                message: format!(
+                                    "[swfr] Unsupported audio codec {:?} in DefineSound(id={}); playing silence.",
+                                    snd.format, snd.id
+                                ),
+                            });
+                        }
+                        Tag::SoundStreamHead(head)
+                            if matches!(
+                                head.stream_format,
+                                swfr_swf::SoundFormat::Nellymoser16k
+                                    | swfr_swf::SoundFormat::Nellymoser8k
+                                    | swfr_swf::SoundFormat::Nellymoser
+                                    | swfr_swf::SoundFormat::Speex
+                            ) =>
+                        {
+                            self.logs.push(LogLine {
+                                level: LogLevel::Warn,
+                                message: format!(
+                                    "[swfr] Unsupported streaming audio codec {:?}; playing silence.",
+                                    head.stream_format
+                                ),
+                            });
+                        }
+                        _ => {}
+                    }
+                }
             }
 
-            // 1. Deliver keyboard input to AVM1
+            // 1. Update keyboard state on AVM1 before frame scripts run (so Key.isDown(code) in frame 1 sees held keys)
             for kev in &input.keys {
                 rt.vm.set_key_state(kev.keycode, kev.down);
             }
@@ -595,6 +634,20 @@ impl Player {
                 self.options.trace_to_log,
                 &mut self.logs,
             );
+
+            // 3. Deliver immediate keyboard clip event handlers (onClipEvent(keyDown/keyUp/keyPress), TSD 4.6 item 10)
+            for kev in &input.keys {
+                let key_events = rt.stage.dispatch_key_event(kev.keycode, kev.down);
+                Self::dispatch_events(
+                    key_events,
+                    &mut rt.stage,
+                    &mut rt.vm,
+                    &mut rt.audio,
+                    stereo_frames,
+                    self.options.trace_to_log,
+                    &mut self.logs,
+                );
+            }
 
             // 3. Deliver pointer input to Stage and execute any triggered button actions
             if let Some((px, py)) = input.pointer {

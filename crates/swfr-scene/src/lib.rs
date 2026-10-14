@@ -58,6 +58,46 @@ pub enum Character {
     Sound(SoundDef),
 }
 
+/// `onClipEvent(load)` bit flag in `CLIPACTIONRECORD` (`0x0000_0001`).
+pub const CLIP_EVENT_LOAD: u32 = 0x0000_0001;
+/// `onClipEvent(enterFrame)` bit flag in `CLIPACTIONRECORD` (`0x0000_0002`).
+pub const CLIP_EVENT_ENTER_FRAME: u32 = 0x0000_0002;
+/// `onClipEvent(unload)` bit flag in `CLIPACTIONRECORD` (`0x0000_0004`).
+pub const CLIP_EVENT_UNLOAD: u32 = 0x0000_0004;
+/// `onClipEvent(mouseMove)` bit flag in `CLIPACTIONRECORD` (`0x0000_0008`).
+pub const CLIP_EVENT_MOUSE_MOVE: u32 = 0x0000_0008;
+/// `onClipEvent(mouseDown)` bit flag in `CLIPACTIONRECORD` (`0x0000_0010`).
+pub const CLIP_EVENT_MOUSE_DOWN: u32 = 0x0000_0010;
+/// `onClipEvent(mouseUp)` bit flag in `CLIPACTIONRECORD` (`0x0000_0020`).
+pub const CLIP_EVENT_MOUSE_UP: u32 = 0x0000_0020;
+/// `onClipEvent(keyDown)` bit flag in `CLIPACTIONRECORD` (`0x0000_0040`).
+pub const CLIP_EVENT_KEY_DOWN: u32 = 0x0000_0040;
+/// `onClipEvent(keyUp)` bit flag in `CLIPACTIONRECORD` (`0x0000_0080`).
+pub const CLIP_EVENT_KEY_UP: u32 = 0x0000_0080;
+/// `onClipEvent(data)` bit flag in `CLIPACTIONRECORD` (`0x0000_0100`).
+pub const CLIP_EVENT_DATA: u32 = 0x0000_0100;
+/// `onClipEvent(initialize)` bit flag in `CLIPACTIONRECORD` (`0x0000_0200`).
+pub const CLIP_EVENT_INITIALIZE: u32 = 0x0000_0200;
+/// `onClipEvent(press)` bit flag in `CLIPACTIONRECORD` (`0x0000_0400`).
+pub const CLIP_EVENT_PRESS: u32 = 0x0000_0400;
+/// `onClipEvent(release)` bit flag in `CLIPACTIONRECORD` (`0x0000_0800`).
+pub const CLIP_EVENT_RELEASE: u32 = 0x0000_0800;
+/// `onClipEvent(keyPress)` bit flag in `CLIPACTIONRECORD` (`0x0002_0000`).
+pub const CLIP_EVENT_KEY_PRESS: u32 = 0x0002_0000;
+/// `onClipEvent(construct)` bit flag in `CLIPACTIONRECORD` (`0x0004_0000`).
+pub const CLIP_EVENT_CONSTRUCT: u32 = 0x0004_0000;
+
+/// Decoded `CLIPACTIONRECORD` attached to a placed movie clip (`PlaceObject2` / `PlaceObject3`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClipActionRecord {
+    /// Bitmask of `CLIP_EVENT_*` flags.
+    pub event_flags: u32,
+    /// Optional key code when [`CLIP_EVENT_KEY_PRESS`] is set.
+    pub key_code: Option<u8>,
+    /// ActionScript bytecode payload.
+    pub actions: Vec<u8>,
+}
+
 /// Interactive button visual state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ButtonState {
@@ -95,6 +135,8 @@ pub struct DisplayObject {
     pub dynamic_text: Option<String>,
     /// Independent timeline when referencing `Character::Sprite`.
     pub sprite_timeline: Option<Timeline>,
+    /// Decoded `CLIPACTIONRECORD` handlers attached to this clip.
+    pub clip_actions: Vec<ClipActionRecord>,
 }
 
 /// 2D path command in twips (`1/20` pixel).
@@ -271,7 +313,27 @@ pub fn flatten_morph_shape(morph: &MorphShapeDef, ratio: u16) -> FlattenedShape 
                 focal_point_q8: i16::try_from(lerp_i32(i32::from(*sf), i32::from(*ef)))
                     .unwrap_or(*ef),
             },
-            _ => s.clone(),
+            (
+                FillStyle::Bitmap {
+                    bitmap_id,
+                    matrix: sm,
+                    repeating,
+                    smoothed,
+                },
+                FillStyle::Bitmap { matrix: em, .. },
+            ) => FillStyle::Bitmap {
+                bitmap_id: *bitmap_id,
+                matrix: lerp_matrix(*sm, *em),
+                repeating: *repeating,
+                smoothed: *smoothed,
+            },
+            _ => {
+                if ratio >= 32_768 {
+                    e.clone()
+                } else {
+                    s.clone()
+                }
+            }
         };
         fill_styles.push(interp);
     }
@@ -1005,6 +1067,8 @@ pub struct FrameEvents {
 /// and dirty-rectangle list.
 #[derive(Debug, Clone)]
 pub struct Stage {
+    /// SWF format version from header (`1..=43`).
+    pub swf_version: u8,
     /// Stage width in pixels.
     pub width_px: u32,
     /// Stage height in pixels.
@@ -1039,6 +1103,7 @@ impl Stage {
         let height_px = movie.header.height_px();
         let fps = movie.header.fps();
         let mut stage = Self {
+            swf_version: movie.header.version,
             width_px,
             height_px,
             fps,
@@ -1062,11 +1127,29 @@ impl Stage {
         for tag in tags {
             match tag {
                 Tag::DefineShape(s) => {
-                    self.dictionary.insert(s.id, Character::Shape(s.clone()));
+                    let mut shape = s.clone();
+                    if self.swf_version < 8 {
+                        clear_bitmap_smoothing(&mut shape.fill_styles);
+                        for rec in &mut shape.records {
+                            if let ShapeRecord::StyleChange {
+                                new_fill_styles: Some(ref mut nfs),
+                                ..
+                            } = rec
+                            {
+                                clear_bitmap_smoothing(nfs);
+                            }
+                        }
+                    }
+                    self.dictionary.insert(shape.id, Character::Shape(shape));
                 }
                 Tag::DefineMorphShape(m) => {
+                    let mut morph = m.clone();
+                    if self.swf_version < 8 {
+                        clear_bitmap_smoothing(&mut morph.start_fill_styles);
+                        clear_bitmap_smoothing(&mut morph.end_fill_styles);
+                    }
                     self.dictionary
-                        .insert(m.id, Character::MorphShape(m.clone()));
+                        .insert(morph.id, Character::MorphShape(morph));
                 }
                 Tag::JPEGTables { jpeg_data } => {
                     self.jpeg_tables = Some(jpeg_data.clone());
@@ -1154,10 +1237,12 @@ impl Stage {
         let dict = self.dictionary.clone();
         let mut bg = self.background_color;
         let mut dirty = false;
+        let swf_version = self.swf_version;
 
         step_timeline_one_frame(
             &mut self.root,
             "_root",
+            swf_version,
             &dict,
             &mut bg,
             &mut dirty,
@@ -1186,11 +1271,13 @@ impl Stage {
         let dict = self.dictionary.clone();
         let mut bg = self.background_color;
         let mut dirty = false;
+        let swf_version = self.swf_version;
 
         if target_path.is_empty() || target_path == "_root" || target_path == "/" {
             seek_timeline(
                 &mut self.root,
                 "_root",
+                swf_version,
                 target_frame,
                 play_after,
                 &dict,
@@ -1208,6 +1295,7 @@ impl Stage {
                         seek_timeline(
                             st,
                             clean,
+                            swf_version,
                             target_frame,
                             play_after,
                             &dict,
@@ -1224,16 +1312,59 @@ impl Stage {
         events
     }
 
+    /// Dispatches a keyboard press/release event immediately to any placed clips with
+    /// `onClipEvent(keyDown)` / `onClipEvent(keyUp)` / `onClipEvent(keyPress)` handlers (TSD 4.6 item 10).
+    #[must_use]
+    pub fn dispatch_key_event(&self, keycode: u32, down: bool) -> FrameEvents {
+        let mut events = FrameEvents::default();
+        let flag = if down {
+            CLIP_EVENT_KEY_DOWN
+        } else {
+            CLIP_EVENT_KEY_UP
+        };
+        collect_clip_input_events_recursive(&self.root, "_root", flag, Some(keycode), &mut events);
+        events
+    }
+
     /// Updates pointer coordinates (in stage twips) and button state, returning any triggered
-    /// button action scripts (`DefineButton` / `DefineButton2`).
+    /// button and clip mouse action scripts (`DefineButton`, `DefineButton2`, `onClipEvent(mouse*)`).
     pub fn update_pointer(&mut self, x_twips: i32, y_twips: i32, pressed: bool) -> FrameEvents {
         let was_down = self.pointer_down;
+        let had_pos = self.pointer_twips != (-10_000, -10_000);
+        let moved = had_pos && self.pointer_twips != (x_twips, y_twips);
         self.pointer_twips = (x_twips, y_twips);
         self.pointer_down = pressed;
 
         let mut events = FrameEvents::default();
         let dict = self.dictionary.clone();
         let mut changed = false;
+
+        if moved {
+            collect_clip_input_events_recursive(
+                &self.root,
+                "_root",
+                CLIP_EVENT_MOUSE_MOVE,
+                None,
+                &mut events,
+            );
+        }
+        if !was_down && pressed {
+            collect_clip_input_events_recursive(
+                &self.root,
+                "_root",
+                CLIP_EVENT_MOUSE_DOWN,
+                None,
+                &mut events,
+            );
+        } else if was_down && !pressed {
+            collect_clip_input_events_recursive(
+                &self.root,
+                "_root",
+                CLIP_EVENT_MOUSE_UP,
+                None,
+                &mut events,
+            );
+        }
 
         for obj in self.root.display_list.values_mut() {
             if let Some(Character::Button(btn)) = dict.get(&obj.character_id) {
@@ -1336,17 +1467,192 @@ impl Stage {
     }
 }
 
+fn clear_bitmap_smoothing(styles: &mut [FillStyle]) {
+    for st in styles {
+        if let FillStyle::Bitmap { smoothed, .. } = st {
+            *smoothed = false;
+        }
+    }
+}
+
+fn child_clip_path(parent_path: &str, depth: u16, name: Option<&str>) -> String {
+    match name {
+        Some(n) => format!("{parent_path}.{n}"),
+        None => format!("{parent_path}._d{depth}"),
+    }
+}
+
+/// Decodes raw `CLIPACTIONS` bytes from a `PlaceObject2` / `PlaceObject3` tag into
+/// structured [`ClipActionRecord`] entries.
+#[must_use]
+pub fn decode_clip_actions(raw: &[u8], swf_version: u8) -> Vec<ClipActionRecord> {
+    let mut r = swfr_reader::Reader::new(raw);
+    let Ok(_reserved) = r.u16() else {
+        return Vec::new();
+    };
+    let all_res = if swf_version >= 6 {
+        r.u32()
+    } else {
+        r.u16().map(u32::from)
+    };
+    if all_res.is_err() {
+        return Vec::new();
+    }
+
+    let mut records = Vec::new();
+    loop {
+        let flags_res = if swf_version >= 6 {
+            r.u32()
+        } else {
+            r.u16().map(u32::from)
+        };
+        let Ok(flags) = flags_res else {
+            break;
+        };
+        if flags == 0 {
+            break;
+        }
+        let Ok(size_u32) = r.u32() else {
+            break;
+        };
+        let size = usize::try_from(size_u32).unwrap_or(0);
+        if r.remaining() < size {
+            break;
+        }
+        if (flags & CLIP_EVENT_KEY_PRESS) != 0 && size >= 1 {
+            let Ok(kc) = r.u8() else {
+                break;
+            };
+            let Ok(act) = r.bytes(size - 1) else {
+                break;
+            };
+            records.push(ClipActionRecord {
+                event_flags: flags,
+                key_code: Some(kc),
+                actions: act.to_vec(),
+            });
+        } else {
+            let Ok(act) = r.bytes(size) else {
+                break;
+            };
+            records.push(ClipActionRecord {
+                event_flags: flags,
+                key_code: None,
+                actions: act.to_vec(),
+            });
+        }
+    }
+    records
+}
+
+fn collect_clip_input_events_recursive(
+    tl: &Timeline,
+    path: &str,
+    flag: u32,
+    keycode: Option<u32>,
+    events: &mut FrameEvents,
+) {
+    for (&d, obj) in &tl.display_list {
+        let child_path = child_clip_path(path, d, obj.name.as_deref());
+        if let Some(ref child_tl) = obj.sprite_timeline {
+            collect_clip_input_events_recursive(child_tl, &child_path, flag, keycode, events);
+        }
+        for rec in &obj.clip_actions {
+            if (rec.event_flags & flag) != 0 && !rec.actions.is_empty() {
+                events
+                    .actions
+                    .push((child_path.clone(), rec.actions.clone()));
+            } else if flag == CLIP_EVENT_KEY_DOWN
+                && (rec.event_flags & CLIP_EVENT_KEY_PRESS) != 0
+                && !rec.actions.is_empty()
+            {
+                if let (Some(want), Some(got)) = (rec.key_code, keycode) {
+                    if u32::from(want) == got {
+                        events
+                            .actions
+                            .push((child_path.clone(), rec.actions.clone()));
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn collect_unload_actions_recursive(
+    obj: &DisplayObject,
+    obj_path: &str,
+    out: &mut Vec<(String, Vec<u8>)>,
+) {
+    if let Some(ref child_tl) = obj.sprite_timeline {
+        for (&cd, cobj) in &child_tl.display_list {
+            let cpath = child_clip_path(obj_path, cd, cobj.name.as_deref());
+            collect_unload_actions_recursive(cobj, &cpath, out);
+        }
+    }
+    for rec in &obj.clip_actions {
+        if (rec.event_flags & CLIP_EVENT_UNLOAD) != 0 && !rec.actions.is_empty() {
+            out.push((obj_path.to_owned(), rec.actions.clone()));
+        }
+    }
+}
+
+fn collect_flag_actions_recursive(
+    obj: &DisplayObject,
+    obj_path: &str,
+    flag: u32,
+    children_first: bool,
+    out: &mut Vec<(String, Vec<u8>)>,
+) {
+    if !children_first {
+        for rec in &obj.clip_actions {
+            if (rec.event_flags & flag) != 0 && !rec.actions.is_empty() {
+                out.push((obj_path.to_owned(), rec.actions.clone()));
+            }
+        }
+    }
+    if let Some(ref child_tl) = obj.sprite_timeline {
+        for (&cd, cobj) in &child_tl.display_list {
+            let cpath = child_clip_path(obj_path, cd, cobj.name.as_deref());
+            collect_flag_actions_recursive(cobj, &cpath, flag, children_first, out);
+        }
+    }
+    if children_first {
+        for rec in &obj.clip_actions {
+            if (rec.event_flags & flag) != 0 && !rec.actions.is_empty() {
+                out.push((obj_path.to_owned(), rec.actions.clone()));
+            }
+        }
+    }
+}
+
 fn step_timeline_one_frame(
     tl: &mut Timeline,
     path: &str,
+    swf_version: u8,
     dict: &BTreeMap<u16, Character>,
     bg: &mut Rgba,
     dirty: &mut bool,
     events: &mut FrameEvents,
 ) {
-    let existing_depths: Vec<u16> = tl.display_list.keys().copied().collect();
+    let existing: Vec<(u16, u16)> = tl
+        .display_list
+        .iter()
+        .map(|(&d, o)| (d, o.character_id))
+        .collect();
+
+    let mut frame_events = FrameEvents::default();
     if !tl.frame0_executed {
-        execute_timeline_frame_tags(tl, 0, path, dict, bg, dirty, events, true);
+        execute_timeline_frame_tags(
+            tl,
+            0,
+            path,
+            swf_version,
+            dict,
+            bg,
+            dirty,
+            &mut frame_events,
+            true,
+        );
         tl.frame0_executed = true;
     } else if tl.playing && tl.frame_count > 1 {
         let next = (tl.current_frame.saturating_add(1)) % tl.frame_count;
@@ -1355,21 +1661,62 @@ fn step_timeline_one_frame(
             *dirty = true;
         }
         tl.current_frame = next;
-        execute_timeline_frame_tags(tl, next, path, dict, bg, dirty, events, true);
+        execute_timeline_frame_tags(
+            tl,
+            next,
+            path,
+            swf_version,
+            dict,
+            bg,
+            dirty,
+            &mut frame_events,
+            true,
+        );
     }
 
-    // Advance nested DefineSprite timelines that were already present before this step
-    for d in existing_depths {
+    // Advance surviving pre-existing nested DefineSprite timelines and collect enterFrame events
+    let mut enter_frame_actions: Vec<(String, Vec<u8>)> = Vec::new();
+    for (d, prev_cid) in existing {
         let Some(obj) = tl.display_list.get_mut(&d) else {
             continue;
         };
-        let child_path = obj
-            .name
-            .as_deref()
-            .map_or_else(|| format!("{path}._d{d}"), |n| format!("{path}.{n}"));
-        if let Some(ref mut child_tl) = obj.sprite_timeline {
-            step_timeline_one_frame(child_tl, &child_path, dict, bg, dirty, events);
+        if obj.character_id != prev_cid {
+            continue;
         }
+        let child_path = child_clip_path(path, d, obj.name.as_deref());
+        if let Some(ref mut child_tl) = obj.sprite_timeline {
+            let mut child_ev = FrameEvents::default();
+            step_timeline_one_frame(
+                child_tl,
+                &child_path,
+                swf_version,
+                dict,
+                bg,
+                dirty,
+                &mut child_ev,
+            );
+            events.start_sounds.extend(child_ev.start_sounds);
+            events.stream_heads.extend(child_ev.stream_heads);
+            events.stream_blocks.extend(child_ev.stream_blocks);
+            enter_frame_actions.extend(child_ev.actions);
+        }
+        for rec in &obj.clip_actions {
+            if (rec.event_flags & CLIP_EVENT_ENTER_FRAME) != 0 && !rec.actions.is_empty() {
+                enter_frame_actions.push((child_path.clone(), rec.actions.clone()));
+            }
+        }
+    }
+
+    events.start_sounds.extend(frame_events.start_sounds);
+    events.stream_heads.extend(frame_events.stream_heads);
+    events.stream_blocks.extend(frame_events.stream_blocks);
+    // If no unload actions were queued on this frame, enterFrame runs before parent frame DoAction;
+    // otherwise frame_events.actions already ordered unload -> parent -> load.
+    if enter_frame_actions.is_empty() {
+        events.actions.extend(frame_events.actions);
+    } else {
+        events.actions.extend(enter_frame_actions);
+        events.actions.extend(frame_events.actions);
     }
 }
 
@@ -1377,6 +1724,7 @@ fn step_timeline_one_frame(
 fn seek_timeline(
     tl: &mut Timeline,
     path: &str,
+    swf_version: u8,
     target_frame: u16,
     play_after: bool,
     dict: &BTreeMap<u16, Character>,
@@ -1388,7 +1736,17 @@ fn seek_timeline(
     tl.display_list.clear();
     for f in 0..=clamped {
         let emit_actions = f == clamped;
-        execute_timeline_frame_tags(tl, f, path, dict, bg, dirty, events, emit_actions);
+        execute_timeline_frame_tags(
+            tl,
+            f,
+            path,
+            swf_version,
+            dict,
+            bg,
+            dirty,
+            events,
+            emit_actions,
+        );
     }
     tl.current_frame = clamped;
     tl.playing = play_after;
@@ -1401,6 +1759,7 @@ fn execute_timeline_frame_tags(
     tl: &mut Timeline,
     frame_idx: u16,
     path: &str,
+    swf_version: u8,
     dict: &BTreeMap<u16, Character>,
     bg: &mut Rgba,
     dirty: &mut bool,
@@ -1414,6 +1773,10 @@ fn execute_timeline_frame_tags(
         return;
     };
 
+    let mut pre_parent_actions: Vec<(String, Vec<u8>)> = Vec::new();
+    let mut parent_actions: Vec<(String, Vec<u8>)> = Vec::new();
+    let mut post_parent_actions: Vec<(String, Vec<u8>)> = Vec::new();
+
     for tag in &slice {
         match tag {
             Tag::SetBackgroundColor { r, g, b } => {
@@ -1421,20 +1784,48 @@ fn execute_timeline_frame_tags(
                 *dirty = true;
             }
             Tag::PlaceObject(po) => {
-                apply_place_object1(tl, po, dict);
+                apply_place_object1(
+                    tl,
+                    po,
+                    path,
+                    swf_version,
+                    dict,
+                    bg,
+                    dirty,
+                    events,
+                    &mut post_parent_actions,
+                    emit_actions,
+                );
                 *dirty = true;
             }
             Tag::PlaceObject2(po2) | Tag::PlaceObject3(po2) => {
-                apply_place_object2(tl, po2, dict, bg, dirty, events);
+                apply_place_object2(
+                    tl,
+                    po2,
+                    path,
+                    swf_version,
+                    dict,
+                    bg,
+                    dirty,
+                    events,
+                    &mut pre_parent_actions,
+                    &mut post_parent_actions,
+                    emit_actions,
+                );
                 *dirty = true;
             }
             Tag::RemoveObject { depth, .. } | Tag::RemoveObject2 { depth } => {
-                tl.display_list.remove(depth);
+                if let Some(removed) = tl.display_list.remove(depth) {
+                    if emit_actions {
+                        let rpath = child_clip_path(path, *depth, removed.name.as_deref());
+                        collect_unload_actions_recursive(&removed, &rpath, &mut pre_parent_actions);
+                    }
+                }
                 *dirty = true;
             }
             Tag::DoInitAction { actions, .. } | Tag::DoAction { actions } => {
                 if emit_actions && !actions.is_empty() {
-                    events.actions.push((path.to_owned(), actions.clone()));
+                    parent_actions.push((path.to_owned(), actions.clone()));
                 }
             }
             Tag::StartSound {
@@ -1458,10 +1849,48 @@ fn execute_timeline_frame_tags(
             _ => {}
         }
     }
+
+    if emit_actions {
+        events.actions.extend(pre_parent_actions);
+        events.actions.extend(parent_actions);
+        events.actions.extend(post_parent_actions);
+    }
 }
 
-fn apply_place_object1(tl: &mut Timeline, po: &PlaceObjectTag, dict: &BTreeMap<u16, Character>) {
-    let (dynamic_text, sprite_timeline) = init_instance_state(po.character_id, dict);
+#[allow(clippy::too_many_arguments)]
+fn apply_place_object1(
+    tl: &mut Timeline,
+    po: &PlaceObjectTag,
+    parent_path: &str,
+    swf_version: u8,
+    dict: &BTreeMap<u16, Character>,
+    bg: &mut Rgba,
+    dirty: &mut bool,
+    events: &mut FrameEvents,
+    post_parent_actions: &mut Vec<(String, Vec<u8>)>,
+    emit_actions: bool,
+) {
+    let (dynamic_text, mut sprite_timeline) = init_instance_state(po.character_id, dict);
+    if let Some(ref mut st) = sprite_timeline {
+        let sp_path = format!("{parent_path}._d{}", po.depth);
+        let mut child_ev = FrameEvents::default();
+        execute_timeline_frame_tags(
+            st,
+            0,
+            &sp_path,
+            swf_version,
+            dict,
+            bg,
+            dirty,
+            &mut child_ev,
+            emit_actions,
+        );
+        st.frame0_executed = true;
+        events.start_sounds.extend(child_ev.start_sounds);
+        events.stream_heads.extend(child_ev.stream_heads);
+        events.stream_blocks.extend(child_ev.stream_blocks);
+        post_parent_actions.extend(child_ev.actions);
+    }
     tl.display_list.insert(
         po.depth,
         DisplayObject {
@@ -1476,17 +1905,24 @@ fn apply_place_object1(tl: &mut Timeline, po: &PlaceObjectTag, dict: &BTreeMap<u
             button_pressed_inside: false,
             dynamic_text,
             sprite_timeline,
+            clip_actions: Vec::new(),
         },
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn apply_place_object2(
     tl: &mut Timeline,
     po2: &PlaceObject2Tag,
+    parent_path: &str,
+    swf_version: u8,
     dict: &BTreeMap<u16, Character>,
     bg: &mut Rgba,
     dirty: &mut bool,
     events: &mut FrameEvents,
+    pre_parent_actions: &mut Vec<(String, Vec<u8>)>,
+    post_parent_actions: &mut Vec<(String, Vec<u8>)>,
+    emit_actions: bool,
 ) {
     if po2.is_move && po2.character_id.is_none() {
         if let Some(existing) = tl.display_list.get_mut(&po2.depth) {
@@ -1510,6 +1946,16 @@ fn apply_place_object2(
     }
 
     let prev = tl.display_list.get(&po2.depth).cloned();
+    if let Some(ref old_obj) = prev {
+        if po2.character_id.is_some()
+            && po2.character_id != Some(old_obj.character_id)
+            && emit_actions
+        {
+            let old_path = child_clip_path(parent_path, po2.depth, old_obj.name.as_deref());
+            collect_unload_actions_recursive(old_obj, &old_path, pre_parent_actions);
+        }
+    }
+
     let char_id = po2
         .character_id
         .or_else(|| prev.as_ref().map(|p| p.character_id))
@@ -1533,30 +1979,77 @@ fn apply_place_object2(
     let clip_depth = po2
         .clip_depth
         .or_else(|| prev.as_ref().and_then(|p| p.clip_depth));
+    let clip_actions = match po2.clip_actions_raw.as_deref() {
+        Some(raw) => decode_clip_actions(raw, swf_version),
+        None => Vec::new(),
+    };
+
+    let sp_path = child_clip_path(parent_path, po2.depth, name.as_deref());
 
     let (dynamic_text, mut sprite_timeline) = init_instance_state(char_id, dict);
+    let mut child_frame0_actions: Vec<(String, Vec<u8>)> = Vec::new();
     if let Some(ref mut st) = sprite_timeline {
-        let sp_path = name.as_deref().unwrap_or("_sprite");
-        execute_timeline_frame_tags(st, 0, sp_path, dict, bg, dirty, events, true);
+        let mut child_ev = FrameEvents::default();
+        execute_timeline_frame_tags(
+            st,
+            0,
+            &sp_path,
+            swf_version,
+            dict,
+            bg,
+            dirty,
+            &mut child_ev,
+            emit_actions,
+        );
         st.frame0_executed = true;
+        events.start_sounds.extend(child_ev.start_sounds);
+        events.stream_heads.extend(child_ev.stream_heads);
+        events.stream_blocks.extend(child_ev.stream_blocks);
+        child_frame0_actions = child_ev.actions;
     }
 
-    tl.display_list.insert(
-        po2.depth,
-        DisplayObject {
-            character_id: char_id,
-            depth: po2.depth,
-            matrix,
-            color_transform,
-            ratio,
-            name,
-            clip_depth,
-            button_state: ButtonState::Up,
-            button_pressed_inside: false,
-            dynamic_text,
-            sprite_timeline,
-        },
-    );
+    let placed = DisplayObject {
+        character_id: char_id,
+        depth: po2.depth,
+        matrix,
+        color_transform,
+        ratio,
+        name,
+        clip_depth,
+        button_state: ButtonState::Up,
+        button_pressed_inside: false,
+        dynamic_text,
+        sprite_timeline,
+        clip_actions,
+    };
+
+    if emit_actions {
+        // 1. initialize (parent before child) and construct (parent before child) run before parent timeline DoAction
+        collect_flag_actions_recursive(
+            &placed,
+            &sp_path,
+            CLIP_EVENT_INITIALIZE,
+            false,
+            pre_parent_actions,
+        );
+        collect_flag_actions_recursive(
+            &placed,
+            &sp_path,
+            CLIP_EVENT_CONSTRUCT,
+            false,
+            pre_parent_actions,
+        );
+        // 2. load handler runs after parent timeline's code and before the clip's own frame-0 code (TSD 4.6 item 10)
+        for rec in &placed.clip_actions {
+            if (rec.event_flags & CLIP_EVENT_LOAD) != 0 && !rec.actions.is_empty() {
+                post_parent_actions.push((sp_path.clone(), rec.actions.clone()));
+            }
+        }
+        // 3. Clip's own frame-0 code (and any nested child clip load + frame-0 code) runs after clip's load handler
+        post_parent_actions.extend(child_frame0_actions);
+    }
+
+    tl.display_list.insert(po2.depth, placed);
 }
 
 fn init_instance_state(

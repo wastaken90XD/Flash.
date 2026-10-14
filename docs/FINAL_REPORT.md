@@ -1,6 +1,6 @@
-# `swfr` v1 Engineering-Complete Report (Re-Audited per TSD Part 3.14 & Part 3.1)
+# `swfr` v1 Engineering-Complete Report (Re-Audited per TSD Part 3.14, Part 3.1 & Part 4)
 
-All autonomous implementation tasks (**Task 0**, **Milestones M0 through M6**, and **TSD Part 3.14 End-to-End Acceptance**) are complete, verified, and re-audited on branch [`arena/a4bfe02a-flash`](https://github.com/wastaken90XD/Flash./tree/arena/a4bfe02a-flash) ([PR #1](https://github.com/wastaken90XD/Flash./pull/1)).
+All autonomous implementation tasks (**Task 0**, **Milestones M0 through M6**, **TSD Part 3.14 End-to-End Acceptance**, and **TSD Part 4 Prior Art & Research Notes (`4.1`–`4.8`)**) are complete, verified, and re-audited on branch [`arena/a4bfe02a-flash`](https://github.com/wastaken90XD/Flash./tree/arena/a4bfe02a-flash) ([PR #1](https://github.com/wastaken90XD/Flash./pull/1)).
 
 ---
 
@@ -73,3 +73,20 @@ Every item below names the exact Rust `#[test]` function identifier(s) and passi
    - All direct dependencies (`miniz_oxide 0.9.1`, `lzma-rs 0.3.0`, `tiny-skia 0.12.0`, `png 0.18.1`, `zune-jpeg 0.5.15`, `fontdue 0.9.4`, `symphonia 0.5.5`) are recorded in `Cargo.lock`, `deps-allow.txt`, `deny.toml`, and `THIRD_PARTY_LICENSES.md`. `symphonia 0.5.5` is licensed under `MPL-2.0` (weak file-level copyleft); owner sign-off is requested for distributing prebuilt binary archives containing `symphonia`.
 3. **Physical Hardware Verification (`docs/platform-notes.md`):**
    - `docs/platform-notes.md` is marked `UNVERIFIED` pending owner testing of V1–V7 on physical Reference A/B/C hardware.
+4. **Optional `corpus-ext` CI Job & Ruffle `swf` Test Oracle (TSD 4.4, 4.5, 4.7 item 6):**
+   - Opened `[question]` issue asking the owner to decide on enabling `corpus-ext` and adding Ruffle's `swf` (`MIT OR Apache-2.0`) crate as a `[dev-dependencies]` test-only oracle.
+
+---
+
+## 4. TSD Part 4 (`4.1`–`4.8`) Prior Art & Hard-Areas Verification Table
+
+| # | TSD 4.7 Action / 4.6 Requirement | Artifact / Proving Test(s) (`#[test]` identifier) | Status |
+| :--- | :--- | :--- | :--- |
+| **4.7.1** | Save Part 4 as `docs/notes/prior-art.md` | [`docs/notes/prior-art.md`](../blob/arena/a4bfe02a-flash/docs/notes/prior-art.md) | PASS |
+| **4.7.2** | Add the 14 items from 4.6 to `docs/notes/tag-coverage.md` and `docs/KNOWN_LIMITATIONS.md`, and write tests for each one fitting M1–M5 | [`docs/notes/tag-coverage.md`](../blob/arena/a4bfe02a-flash/docs/notes/tag-coverage.md), [`docs/KNOWN_LIMITATIONS.md`](../blob/arena/a4bfe02a-flash/docs/KNOWN_LIMITATIONS.md), `e2e_hard_area_swf1_swf2_morph_mixed_fills_nellymoser_speex_and_skipped_frames_via_abi`, `e2e_hard_area_event_order_load_unload_button_mouse_key_via_abi` (`crates/swfr-libretro/tests/e2e.rs`) | PASS |
+| **4.7.3** | M3: write event-order tests for item 10 (`load`, `unload`, button, mouse, key) and record the result in `DECISIONS.md` | `e2e_hard_area_event_order_load_unload_button_mouse_key_via_abi` (`crates/swfr-libretro/tests/e2e.rs`), [`DECISIONS.md` (`D-010`, `D-011`)](../blob/arena/a4bfe02a-flash/DECISIONS.md) | PASS |
+| **4.7.4** | M4: add `expectation = "verified"` or `"derived"` to every conformance test's meta, and show the counts (`verified = 0`, `derived = 160`) in `ci-report` | `avm1_es3_conformance_160_generated_movies` (`crates/swfr-avm1/tests/conformance.rs`), `.github/workflows/ci.yml` (`ci-report`) | PASS |
+| **4.7.5** | M1: add optional `ffdec-crosscheck` job (`continue-on-error: true`) when Java is available on the runner to compare tag sequences and report mismatches without failing the build | `.github/workflows/ci.yml` (`ffdec-crosscheck`) | PASS |
+| **4.7.6** | Open a `[question]` issue asking the owner to decide on the `corpus-ext` job and the Ruffle `swf` test oracle, and continue without them | `.github/workflows/ci.yml` (`ci-report` idempotent `[question]` issue creation) | PASS |
+| **4.7.7** | Check the public issues of `ruffle_libretro` for input, audio, and timing problems, and add relevant items to `docs/KNOWN_LIMITATIONS.md` | [`docs/KNOWN_LIMITATIONS.md` Section 12](../blob/arena/a4bfe02a-flash/docs/KNOWN_LIMITATIONS.md) | PASS |
+

@@ -978,6 +978,8 @@ pub struct Avm1 {
     pub save_ram: Vec<u8>,
     /// Pending `loadMovie(url, target)` requests queued during the frame (TSD M5.6).
     pub load_movie_requests: Vec<(String, String)>,
+    /// Target-frame actions queued by `gotoAndStop` / `gotoAndPlay` during an action block (TSD 4.6 item 7).
+    pending_goto_actions: Vec<Vec<u8>>,
 }
 
 /// Size in bytes of the libretro `RETRO_MEMORY_SAVE_RAM` buffer (`64 KiB`, TSD 2.5).
@@ -1041,6 +1043,7 @@ impl Avm1 {
             shared_objects: BTreeMap::new(),
             save_ram,
             load_movie_requests: Vec::new(),
+            pending_goto_actions: Vec::new(),
         };
         vm.init_builtins();
         vm
@@ -1320,12 +1323,74 @@ impl Avm1 {
         let mut budget = self.max_ops_per_run;
         let mut locals = BTreeMap::new();
         let _ = self.run_ops_inner(ops, None, &mut locals, stage, &mut budget, 0);
+        let mut hops = 0_usize;
+        while !self.pending_goto_actions.is_empty() && hops < 16 && !self.watchdog_tripped {
+            hops += 1;
+            let batch: Vec<Vec<u8>> = self.pending_goto_actions.drain(..).collect();
+            for code in batch {
+                let target_ops = decode_ops(&code);
+                let mut target_locals = BTreeMap::new();
+                let _ = self.run_ops_inner(
+                    &target_ops,
+                    None,
+                    &mut target_locals,
+                    stage,
+                    &mut budget,
+                    0,
+                );
+                if self.watchdog_tripped {
+                    break;
+                }
+            }
+        }
+        self.pending_goto_actions.clear();
         if self.heap.allocations_since_gc > 256 {
             let mut roots: Vec<Value> = self.stack.clone();
             roots.extend(self.globals.values().cloned());
             roots.extend(self.registers.iter().cloned());
             roots.extend(self.shared_objects.values().copied().map(Value::Object));
             let _ = self.heap.collect_garbage(&roots);
+        }
+    }
+
+    fn queue_goto_frame(
+        &mut self,
+        stage: &mut Stage,
+        path: &str,
+        target_frame: u16,
+        play_after: bool,
+    ) {
+        let prev_frame = if path.is_empty() || path == "_root" || path == "/" {
+            stage.root.current_frame
+        } else {
+            let clean = path.trim_start_matches("_root.").trim_start_matches('/');
+            stage
+                .root
+                .display_list
+                .values()
+                .find(|o| o.name.as_deref() == Some(clean))
+                .and_then(|o| o.sprite_timeline.as_ref().map(|t| t.current_frame))
+                .unwrap_or(0)
+        };
+        let ev = stage.goto_frame(path, target_frame, play_after);
+        let new_frame = if path.is_empty() || path == "_root" || path == "/" {
+            stage.root.current_frame
+        } else {
+            let clean = path.trim_start_matches("_root.").trim_start_matches('/');
+            stage
+                .root
+                .display_list
+                .values()
+                .find(|o| o.name.as_deref() == Some(clean))
+                .and_then(|o| o.sprite_timeline.as_ref().map(|t| t.current_frame))
+                .unwrap_or(prev_frame)
+        };
+        if new_frame != prev_frame {
+            for (_, act) in ev.actions {
+                if !act.is_empty() {
+                    self.pending_goto_actions.push(act);
+                }
+            }
         }
     }
 
@@ -1365,11 +1430,11 @@ impl Avm1 {
                         .current_frame
                         .saturating_add(1)
                         .min(stage.root.frame_count.saturating_sub(1));
-                    let _ = stage.goto_frame("_root", next, false);
+                    self.queue_goto_frame(stage, "_root", next, false);
                 }
                 Op::PrevFrame => {
                     let prev = stage.root.current_frame.saturating_sub(1);
-                    let _ = stage.goto_frame("_root", prev, false);
+                    self.queue_goto_frame(stage, "_root", prev, false);
                 }
                 Op::Play => {
                     stage.root.playing = true;
@@ -1381,25 +1446,27 @@ impl Avm1 {
                     self.stop_sounds_requested = true;
                 }
                 Op::GotoFrame(f) => {
-                    let _ = stage.goto_frame("_root", *f, false);
+                    self.queue_goto_frame(stage, "_root", *f, false);
                 }
                 Op::GotoLabel(label) => {
                     if let Some(f) = stage.root.resolve_label(label) {
-                        let _ = stage.goto_frame("_root", f, false);
+                        self.queue_goto_frame(stage, "_root", f, false);
                     }
                 }
                 Op::GotoFrame2(play_after) => {
                     let target = self.pop();
                     match target {
-                        Value::Number(n) => {
-                            let f = (n as i32).saturating_sub(1).max(0) as u16;
-                            let _ = stage.goto_frame("_root", f, *play_after);
+                        Value::Number(n) if n.is_finite() && (n as i32) >= 1 => {
+                            let f = ((n as i32) - 1) as u16;
+                            self.queue_goto_frame(stage, "_root", f, *play_after);
                         }
                         Value::String(s) => {
                             if let Some(f) = stage.root.resolve_label(&s) {
-                                let _ = stage.goto_frame("_root", f, *play_after);
+                                self.queue_goto_frame(stage, "_root", f, *play_after);
                             } else if let Ok(n) = s.parse::<u16>() {
-                                let _ = stage.goto_frame("_root", n.saturating_sub(1), *play_after);
+                                if n >= 1 {
+                                    self.queue_goto_frame(stage, "_root", n - 1, *play_after);
+                                }
                             }
                         }
                         _ => {}
@@ -2078,13 +2145,13 @@ impl Avm1 {
                     let play_after = norm == "gotoandplay";
                     if let Some(arg) = args.first() {
                         match arg {
-                            Value::Number(n) => {
-                                let f = (*n as i32).saturating_sub(1).max(0) as u16;
-                                let _ = stage.goto_frame(path, f, play_after);
+                            Value::Number(n) if n.is_finite() && (*n as i32) >= 1 => {
+                                let f = ((*n as i32) - 1) as u16;
+                                self.queue_goto_frame(stage, path, f, play_after);
                             }
                             Value::String(lbl) => {
                                 if let Some(f) = stage.root.resolve_label(lbl) {
-                                    let _ = stage.goto_frame(path, f, play_after);
+                                    self.queue_goto_frame(stage, path, f, play_after);
                                 }
                             }
                             _ => {}

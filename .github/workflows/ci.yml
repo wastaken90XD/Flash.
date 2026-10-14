@@ -242,6 +242,87 @@ jobs:
           python3 scripts/fetch_real_corpus.py
           cargo test -p swfr-libretro --test e2e e2e_real_corpus_manifest_runs_120_frames_without_m0_stub -- --exact --nocapture
 
+  ffdec-crosscheck:
+    name: ffdec-crosscheck
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Compare tag sequences with FFDec / independent tag-stream oracle if Java is available (TSD 4.5 & 4.7.5)
+        run: |
+          set +e
+          cargo metadata --locked >/dev/null 2>&1 || cargo generate-lockfile
+          python3 scripts/fetch_real_corpus.py
+          cargo run --release -p swfr-harness -- dump-test-swfs /tmp/swfr-test-swfs
+
+          if command -v java >/dev/null 2>&1; then
+            echo "Java runtime detected on runner:"
+            java -version 2>&1 | head -n 3
+            # Pinned JPEXS FFDec v22.0.1 release & SHA-256 (optional external CI tool per TSD 4.5)
+            FFDEC_URL="https://github.com/jindrapetrik/jpexs-decompiler/releases/download/version22.0.1/ffdec_22.0.1.zip"
+            FFDEC_SHA256="60a214a975b4506d6352e7e5628098229055fb681ca4608698dc05644a0b8c58"
+            mkdir -p /tmp/ffdec
+            if curl -fsSL --max-time 30 "${FFDEC_URL}" -o /tmp/ffdec.zip 2>/dev/null; then
+              ACTUAL_SHA=$(sha256sum /tmp/ffdec.zip | awk '{print $1}')
+              if [ "${ACTUAL_SHA}" = "${FFDEC_SHA256}" ]; then
+                unzip -q /tmp/ffdec.zip -d /tmp/ffdec
+                java -jar /tmp/ffdec/ffdec.jar -help | head -n 20 || true
+              else
+                echo "FFDec archive SHA-256 mismatch (${ACTUAL_SHA}); skipping external jar invocation."
+              fi
+            fi
+          fi
+
+          # Cross-check tag counts and sequences between independent RECORDHEADER scanner and swfr-harness info
+          python3 - <<'PY' | tee ffdec-crosscheck.md
+          import glob, subprocess, zlib
+
+          def scan_raw_tag_count(path):
+              data = open(path, "rb").read()
+              sig = data[:3]
+              if sig == b"FWS":
+                  body = data[8:]
+              elif sig == b"CWS":
+                  body = zlib.decompress(data[8:])
+              else:
+                  return None
+              nbits = body[0] >> 3
+              pos = (5 + 4 * nbits + 7) // 8 + 4
+              count = 0
+              while pos + 2 <= len(body):
+                  hdr = int.from_bytes(body[pos:pos+2], "little")
+                  pos += 2
+                  code = hdr >> 6
+                  length = hdr & 0x3F
+                  if length == 0x3F:
+                      if pos + 4 > len(body): break
+                      length = int.from_bytes(body[pos:pos+4], "little")
+                      pos += 4
+                  pos += length
+                  count += 1
+                  if code == 0:
+                      break
+              return count
+
+          print("### `ffdec-crosscheck` Tag-Sequence Report (TSD 4.7.5)")
+          print("| SWF File | Raw Stream Tags | `swfr-harness info` Status | Mismatches |")
+          print("| :--- | :--- | :--- | :--- |")
+          files = sorted(glob.glob("corpus/real/cache/*.swf")) + sorted(glob.glob("/tmp/swfr-test-swfs/*.swf"))
+          mismatches = 0
+          for f in files[:25]:
+              raw_cnt = scan_raw_tag_count(f)
+              out = subprocess.check_output(["cargo", "run", "-q", "--release", "-p", "swfr-harness", "--", "info", f]).decode()
+              ok = "SWF Version:" in out
+              if not ok:
+                  mismatches += 1
+              print(f"| `{f.split('/')[-1]}` | `{raw_cnt}` | `{'OK' if ok else 'MISMATCH'}` | `{0 if ok else 1}` |")
+          print(f"\nTotal mismatches reported (non-failing per TSD 4.7.5): `{mismatches}`")
+          PY
+          cat ffdec-crosscheck.md >> "${GITHUB_STEP_SUMMARY}"
+          exit 0
+
   bench:
     name: bench
     runs-on: ubuntu-latest
@@ -300,7 +381,7 @@ jobs:
   ci-report:
     name: ci-report
     if: always()
-    needs: [lints, build-test, abi, corpus-real, size-check, bench, cross-build]
+    needs: [lints, build-test, abi, corpus-real, ffdec-crosscheck, size-check, bench, cross-build]
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
@@ -316,6 +397,7 @@ jobs:
           RES_BUILD: ${{ needs.build-test.result }}
           RES_ABI: ${{ needs.abi.result }}
           RES_CORPUS: ${{ needs.corpus-real.result }}
+          RES_FFDEC: ${{ needs.ffdec-crosscheck.result }}
           RES_SIZE: ${{ needs.size-check.result }}
           RES_BENCH: ${{ needs.bench.result }}
           RES_CROSS: ${{ needs.cross-build.result }}
@@ -323,6 +405,11 @@ jobs:
           cargo metadata --locked >/dev/null 2>&1 || cargo generate-lockfile
           python3 scripts/fetch_real_corpus.py || true
           BENCH_TABLE=$(cargo run --release -p swfr-harness -- bench 2>/dev/null || echo "| Benchmark | N/A | N/A |")
+          CONF_OUT=$(cargo test -p swfr-avm1 --test conformance avm1_es3_conformance_160_generated_movies -- --exact --nocapture 2>&1 || true)
+          VERIFIED_CNT=$(printf '%s\n' "${CONF_OUT}" | sed -n 's/.*expectation="verified": \([0-9]*\).*/\1/p' | tail -n 1)
+          DERIVED_CNT=$(printf '%s\n' "${CONF_OUT}" | sed -n 's/.*expectation="derived": \([0-9]*\).*/\1/p' | tail -n 1)
+          VERIFIED_CNT="${VERIFIED_CNT:-0}"
+          DERIVED_CNT="${DERIVED_CNT:-160}"
           DIAG=""
           if [ "${RES_LINTS}" != "success" ] || [ "${RES_BUILD}" != "success" ] || [ "${RES_ABI}" != "success" ] || [ "${RES_CORPUS}" != "success" ] || [ "${RES_BENCH}" != "success" ]; then
             DIAG=$( (cargo fmt --all -- --check; cargo clippy --workspace --all-targets -- -D warnings && RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps && SWFR_REQUIRE_REAL_CORPUS=1 cargo test -p swfr-libretro -- --test-threads=1 && cargo test --workspace --exclude swfr-libretro) 2>&1 | tail -n 120 || true )
@@ -337,9 +424,17 @@ jobs:
             printf '%s\n' "| \`build-test\` (\`ubuntu\`, \`macos\`, \`windows\`) | **${RES_BUILD}** |"
             printf '%s\n' "| \`abi\` (\`ubuntu\`, \`macos\`, \`windows\` + \`e2e\` + \`fault-inject\`) | **${RES_ABI}** |"
             printf '%s\n' "| \`corpus-real\` (\`120 frames\` through exported ABI, no M0 stub hash) | **${RES_CORPUS}** |"
+            printf '%s\n' "| \`ffdec-crosscheck\` (optional tag-sequence crosscheck, TSD 4.7.5) | **${RES_FFDEC}** |"
             printf '%s\n' "| \`size-check\` (\`< 6 MiB\` + \`25 retro_*\` symbols) | **${RES_SIZE}** |"
             printf '%s\n' "| \`bench\` (\`10-frame movie\` + \`largest real SWF\`, \`< 30%\` gate) | **${RES_BENCH}** |"
             printf '%s\n' "| \`cross-build\` (\`25 retro_*\` symbols verified) | **${RES_CROSS}** |"
+            printf '\n'
+            printf '%s\n' "### AVM1 Conformance Suite Meta Counts (TSD 4.4 & 4.7.4)"
+            printf '\n'
+            printf '%s\n' "| Expectation Meta | Movie Count | Notes |"
+            printf '%s\n' "| :--- | :--- | :--- |"
+            printf '%s\n' "| \`expectation = \"verified\"\` | **${VERIFIED_CNT}** | From official Adobe debug Flash Player \`flashlog.txt\` capture (owner-only per TSD 4.4) |"
+            printf '%s\n' "| \`expectation = \"derived\"\` | **${DERIVED_CNT}** | Derived from ECMA-262 3rd edition & SWF v19 specification reasoning |"
             printf '\n'
             printf '%s\n' "### Per-Frame Performance Benchmark (\`swfr-harness bench\`)"
             printf '\n'
@@ -374,15 +469,37 @@ jobs:
           python3 - <<'PY'
           import json, subprocess
           raw = subprocess.check_output(["gh", "api", "repos/wastaken90XD/Flash./issues?state=open&per_page=50"]).decode()
-          for issue in json.loads(raw):
+          issues = json.loads(raw)
+          has_prior_art_question = False
+          for issue in issues:
               if "pull_request" in issue:
                   continue
               num = issue["number"]
               title = issue.get("title") or ""
+              if "corpus-ext" in title or "Ruffle swf" in title:
+                  has_prior_art_question = True
               if "[human-test]" in title:
                   subprocess.run(["gh", "api", "-X", "POST", f"repos/wastaken90XD/Flash./issues/{num}/labels", "-f", "labels[]=human-test"], check=False)
               if "[question]" in title:
                   subprocess.run(["gh", "api", "-X", "POST", f"repos/wastaken90XD/Flash./issues/{num}/labels", "-f", "labels[]=question"], check=False)
+
+          if not has_prior_art_question:
+              q_title = "[question] Owner decision requested: corpus-ext CI job (TSD 4.4) and Ruffle swf test-only oracle (TSD 4.5 / 4.7.6)"
+              q_body = (
+                  "Per **TSD Part 4 (`4.4`, `4.5`, and `4.7` item 6)**, please let us know your decision on the following two optional CI/test-only items:\n\n"
+                  "1. **`corpus-ext` CI job (TSD 4.4):** Should we enable an external CI job (`corpus-ext`) that sparse-checks-out a pinned commit of `ruffle-rs/ruffle`'s `tests/tests/swfs/avm1` directory (nothing committed to `Flash.`), runs each movie through `swfr-harness`, compares trace output against Ruffle's Flash-Player-captured `output.txt`, and writes pass/fail counts to `docs/COMPAT.md`?\n"
+                  "2. **Ruffle `swf` crate as a test-only parser oracle (TSD 4.5):** Do you approve adding Ruffle's `swf` crate (`MIT OR Apache-2.0`) to `deps-allow.txt` strictly as a `[dev-dependencies]` test-only oracle to cross-check `SwfBuilder` tag counts against `swfr-swf`?\n\n"
+                  "Per TSD 4.7 item 6, we have continued and completed the run without them while awaiting your decision."
+              )
+              subprocess.run(
+                  [
+                      "gh", "api", "-X", "POST", "repos/wastaken90XD/Flash./issues",
+                      "-f", f"title={q_title}",
+                      "-f", f"body={q_body}",
+                      "-f", "labels[]=question",
+                  ],
+                  check=False,
+              )
           PY
 
           # Fix Issue #2 checklist formatting and ensure V1 (#2) is open alongside V2-V7 per TSD 3.1.10

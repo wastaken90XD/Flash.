@@ -14,15 +14,26 @@ use swfr_scene::Stage;
 use swfr_swf::{Movie, Tag};
 use swfr_testkit::{ActionBuilder, SwfBuilder};
 
-struct ConformanceCase {
+struct ConformanceMeta {
     name: String,
     swf_version: u8,
+    /// `"verified"` (from real Flash Player output) or `"derived"` (ES3 reasoning, TSD 4.4 & 4.7.4).
+    expectation: &'static str,
+}
+
+struct ConformanceCase {
+    meta: ConformanceMeta,
     actions: Vec<u8>,
     expected_trace: Vec<String>,
 }
 
 fn run_movie_case(case: &ConformanceCase) {
-    let mut builder = SwfBuilder::new(case.swf_version, 320, 240, 60.0, 4);
+    assert!(
+        case.meta.expectation == "verified" || case.meta.expectation == "derived",
+        "conformance case '{}' must specify expectation = \"verified\" or \"derived\"",
+        case.meta.name
+    );
+    let mut builder = SwfBuilder::new(case.meta.swf_version, 320, 240, 60.0, 4);
     builder.push_tag(&Tag::DoAction {
         actions: case.actions.clone(),
     });
@@ -45,8 +56,8 @@ fn run_movie_case(case: &ConformanceCase) {
 
     assert_eq!(
         vm.trace_log, case.expected_trace,
-        "AVM1 conformance failure in movie '{}'",
-        case.name
+        "AVM1 conformance failure in movie '{}' (expectation = {:?})",
+        case.meta.name, case.meta.expectation
     );
 }
 
@@ -67,8 +78,11 @@ fn avm1_es3_conformance_160_generated_movies() {
         ab.push_i32(a).increment().trace();
         ab.push_i32(b).decrement().trace();
         cases.push(ConformanceCase {
-            name: format!("arith_int_{i:02}"),
-            swf_version: 8,
+            meta: ConformanceMeta {
+                name: format!("arith_int_{i:02}"),
+                swf_version: 8,
+                expectation: "derived",
+            },
             actions: ab.build(),
             expected_trace: vec![
                 (a + b).to_string(),
@@ -94,8 +108,11 @@ fn avm1_es3_conformance_160_generated_movies() {
         ab.push_i32(lhs).push_i32(sh as i32).shr().trace();
         ab.push_i32(lhs).push_i32(sh as i32).ushr().trace();
         cases.push(ConformanceCase {
-            name: format!("bitwise_{i:02}"),
-            swf_version: 8,
+            meta: ConformanceMeta {
+                name: format!("bitwise_{i:02}"),
+                swf_version: 8,
+                expectation: "derived",
+            },
             actions: ab.build(),
             expected_trace: vec![
                 (lhs & rhs).to_string(),
@@ -131,8 +148,11 @@ fn avm1_es3_conformance_160_generated_movies() {
             "NaN".to_owned()
         };
         cases.push(ConformanceCase {
-            name: format!("coercion_v{swf_ver}_{i:02}"),
-            swf_version: swf_ver,
+            meta: ConformanceMeta {
+                name: format!("coercion_v{swf_ver}_{i:02}"),
+                swf_version: swf_ver,
+                expectation: "derived",
+            },
             actions: ab.build(),
             expected_trace: vec![
                 undef_plus,
@@ -180,8 +200,11 @@ fn avm1_es3_conformance_160_generated_movies() {
             .trace();
 
         cases.push(ConformanceCase {
-            name: format!("string_methods_{i:02}"),
-            swf_version: 8,
+            meta: ConformanceMeta {
+                name: format!("string_methods_{i:02}"),
+                swf_version: 8,
+                expectation: "derived",
+            },
             actions: ab.build(),
             expected_trace: vec![
                 word.len().to_string(),
@@ -236,8 +259,11 @@ fn avm1_es3_conformance_160_generated_movies() {
             .trace();
 
         cases.push(ConformanceCase {
-            name: format!("arrays_and_functions_{i:02}"),
-            swf_version: 8,
+            meta: ConformanceMeta {
+                name: format!("arrays_and_functions_{i:02}"),
+                swf_version: 8,
+                expectation: "derived",
+            },
             actions: ab.build(),
             expected_trace: vec![
                 "3".to_owned(),
@@ -283,8 +309,11 @@ fn avm1_es3_conformance_160_generated_movies() {
             .trace();
 
         cases.push(ConformanceCase {
-            name: format!("math_and_movieclip_{i:02}"),
-            swf_version: 8,
+            meta: ConformanceMeta {
+                name: format!("math_and_movieclip_{i:02}"),
+                swf_version: 8,
+                expectation: "derived",
+            },
             actions: ab.build(),
             expected_trace: vec![
                 i.abs().to_string(),
@@ -296,9 +325,25 @@ fn avm1_es3_conformance_160_generated_movies() {
     }
 
     assert_eq!(cases.len(), 160);
+    let verified_count = cases
+        .iter()
+        .filter(|c| c.meta.expectation == "verified")
+        .count();
+    let derived_count = cases
+        .iter()
+        .filter(|c| c.meta.expectation == "derived")
+        .count();
+    assert_eq!(verified_count, 0);
+    assert_eq!(derived_count, 160);
     for case in &cases {
         run_movie_case(case);
     }
+    println!(
+        "AVM1 conformance suite passed: total={}, expectation=\"verified\": {}, expectation=\"derived\": {}",
+        cases.len(),
+        verified_count,
+        derived_count
+    );
 }
 
 #[test]

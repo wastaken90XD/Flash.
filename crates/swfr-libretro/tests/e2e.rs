@@ -16,23 +16,25 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use swfr_libretro::ffi::{
     copy_audio_frames_from_callback_ptr, copy_c_str_from_callback_ptr, copy_memory_bytes_from_ptr,
-    copy_video_frame_from_callback_ptr, install_log_callback_in_environment,
-    make_test_log_printf_fn, retro_deinit, retro_game_geometry, retro_game_info,
-    retro_get_memory_data, retro_get_memory_size, retro_get_system_av_info, retro_init,
-    retro_load_game, retro_reset, retro_run, retro_serialize, retro_serialize_size,
-    retro_set_audio_sample, retro_set_audio_sample_batch, retro_set_environment,
-    retro_set_input_poll, retro_set_input_state, retro_set_video_refresh, retro_system_av_info,
-    retro_system_timing, retro_unload_game, retro_unserialize, RETRO_DEVICE_ID_POINTER_PRESSED,
-    RETRO_DEVICE_ID_POINTER_X, RETRO_DEVICE_ID_POINTER_Y, RETRO_DEVICE_POINTER,
-    RETRO_ENVIRONMENT_GET_LOG_INTERFACE, RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, RETRO_MEMORY_SAVE_RAM,
+    copy_video_frame_from_callback_ptr, extract_keyboard_callback_from_environment,
+    install_log_callback_in_environment, make_test_log_printf_fn, retro_deinit,
+    retro_game_geometry, retro_game_info, retro_get_memory_data, retro_get_memory_size,
+    retro_get_system_av_info, retro_init, retro_load_game, retro_reset, retro_run, retro_serialize,
+    retro_serialize_size, retro_set_audio_sample, retro_set_audio_sample_batch,
+    retro_set_environment, retro_set_input_poll, retro_set_input_state, retro_set_video_refresh,
+    retro_system_av_info, retro_system_timing, retro_unload_game, retro_unserialize,
+    RetroKeyboardEventFn, RETRO_DEVICE_ID_POINTER_PRESSED, RETRO_DEVICE_ID_POINTER_X,
+    RETRO_DEVICE_ID_POINTER_Y, RETRO_DEVICE_POINTER, RETRO_ENVIRONMENT_GET_LOG_INTERFACE,
+    RETRO_ENVIRONMENT_SET_KEYBOARD_CALLBACK, RETRO_ENVIRONMENT_SET_PIXEL_FORMAT,
+    RETRO_MEMORY_SAVE_RAM,
 };
 use swfr_reader::{ColorTransform, Matrix, Rect};
 use swfr_swf::{
     AudioFormat, ButtonAction, ButtonDef, ButtonRecord, Compression, EditTextDef, FillStyle,
-    GradientStop, MorphShapeDef, PlaceObject2Tag, Rgba, ShapeDef, ShapeRecord, SoundDef, SoundInfo,
-    SoundStreamHeadDef, Tag,
+    GradientStop, LosslessBitmapDef, MorphShapeDef, PlaceObject2Tag, PlaceObjectTag, Rgba,
+    ShapeDef, ShapeRecord, SoundDef, SoundFormat, SoundInfo, SoundStreamHeadDef, Tag,
 };
-use swfr_testkit::{ActionBuilder, SwfBuilder};
+use swfr_testkit::{encode_clip_actions, ActionBuilder, SwfBuilder};
 
 /// Serializes tests in this binary because the libretro C ABI operates on a single global instance.
 static E2E_LOCK: Mutex<()> = Mutex::new(());
@@ -47,6 +49,7 @@ struct E2eFrontend {
     pointer_pressed: bool,
     pointer_x: i16,
     pointer_y: i16,
+    keyboard_cb: Option<RetroKeyboardEventFn>,
 }
 
 static FRONTEND: Mutex<E2eFrontend> = Mutex::new(E2eFrontend {
@@ -58,6 +61,7 @@ static FRONTEND: Mutex<E2eFrontend> = Mutex::new(E2eFrontend {
     pointer_pressed: false,
     pointer_x: 0,
     pointer_y: 0,
+    keyboard_cb: None,
 });
 
 fn reset_frontend() {
@@ -79,6 +83,14 @@ extern "C" fn e2e_environment(cmd: c_uint, data: *mut c_void) -> bool {
     }
     if cmd == RETRO_ENVIRONMENT_GET_LOG_INTERFACE {
         return install_log_callback_in_environment(data, make_test_log_printf_fn(e2e_log_printf));
+    }
+    if cmd == RETRO_ENVIRONMENT_SET_KEYBOARD_CALLBACK {
+        if let Some(cb) = extract_keyboard_callback_from_environment(data) {
+            if let Ok(mut g) = FRONTEND.lock() {
+                g.keyboard_cb = Some(cb);
+            }
+            return true;
+        }
     }
     false
 }
@@ -1448,5 +1460,622 @@ fn e2e_m6_repeated_load_unload_50_cycles_via_abi() {
         retro_unload_game();
     }
 
+    retro_deinit();
+}
+
+/// TSD 4.6 item 10 & 4.7 item 3:
+/// - Button, mouse, and key handlers run immediately when their event happens.
+/// - The `load` handler runs in the first frame the clip is on stage, after the parent timeline's
+///   code and before the clip's own code and before rendering.
+/// - The `unload` handler runs in the first frame the clip is gone, before the parent timeline's code.
+#[test]
+#[allow(clippy::too_many_lines)]
+fn e2e_hard_area_event_order_load_unload_button_mouse_key_via_abi() {
+    let _guard = E2E_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    reset_frontend();
+    init_abi_callbacks();
+
+    let trace_bytes = |msg: &str| -> Vec<u8> {
+        let mut ab = ActionBuilder::new();
+        ab.push_str(msg).trace();
+        ab.build()
+    };
+
+    // Build a 3-frame movie:
+    // - Character 1: 100x80 red shape centered on a 200x160 stage
+    // - Character 2: DefineButton2 covering stage center (50..150, 40..120) with OverUpToOverDown ("btn_press") and OverDownToOverUp ("btn_release")
+    // - Character 3: DefineSprite ("mc") whose own Frame 1 places Character 1 and executes `trace("mc_own_frame1")`
+    let mut b = SwfBuilder::new(8, 200, 160, 30.0, 3);
+    b.push_tag(&Tag::SetBackgroundColor {
+        r: 0x00,
+        g: 0x00,
+        b: 0xFF,
+    });
+    b.push_tag(&Tag::DefineShape(ShapeDef {
+        id: 1,
+        version: 1,
+        bounds: Rect {
+            x_min: 1000,
+            x_max: 3000,
+            y_min: 800,
+            y_max: 2400,
+        },
+        fill_styles: vec![FillStyle::Solid(Rgba::rgb(0xFF, 0x00, 0x00))],
+        line_styles: Vec::new(),
+        records: rect_shape_records(1000, 800, 2000, 1600),
+    }));
+    b.push_tag(&Tag::DefineButton(ButtonDef {
+        id: 2,
+        version: 2,
+        track_as_menu: false,
+        records: vec![ButtonRecord {
+            state_up: true,
+            state_over: true,
+            state_down: true,
+            state_hit_test: true,
+            character_id: 1,
+            depth: 1,
+            matrix: Matrix::IDENTITY,
+            color_transform: None,
+        }],
+        actions: vec![
+            ButtonAction {
+                condition: 0x0004, // OverUpToOverDown
+                actions: trace_bytes("btn_press"),
+            },
+            ButtonAction {
+                condition: 0x0008, // OverDownToOverUp
+                actions: trace_bytes("btn_release"),
+            },
+        ],
+    }));
+    b.push_tag(&Tag::DefineSprite {
+        id: 3,
+        frame_count: 1,
+        tags: vec![
+            Tag::PlaceObject2(PlaceObject2Tag {
+                is_move: false,
+                depth: 1,
+                character_id: Some(1),
+                matrix: Some(Matrix::IDENTITY),
+                color_transform: None,
+                ratio: None,
+                name: None,
+                clip_depth: None,
+                clip_actions_raw: None,
+            }),
+            Tag::DoAction {
+                actions: trace_bytes("mc_own_frame1"),
+            },
+            Tag::ShowFrame,
+            Tag::End,
+        ],
+    });
+
+    // Frame 1: parent DoAction ("parent_frame1"), PlaceObject2 button (depth 2) + sprite "mc" (depth 1) with CLIPACTIONS
+    b.push_tag(&Tag::DoAction {
+        actions: trace_bytes("parent_frame1"),
+    });
+    let clip_actions_raw = encode_clip_actions(
+        8,
+        &[
+            (0x0000_0200, trace_bytes("mc_initialize")),
+            (0x0004_0000, trace_bytes("mc_construct")),
+            (0x0000_0001, trace_bytes("mc_load")),
+            (0x0000_0002, trace_bytes("mc_enterFrame")),
+            (0x0000_0004, trace_bytes("mc_unload")),
+            (0x0000_0008, trace_bytes("mc_mouseMove")),
+            (0x0000_0010, trace_bytes("mc_mouseDown")),
+            (0x0000_0020, trace_bytes("mc_mouseUp")),
+            (0x0000_0040, trace_bytes("mc_keyDown")),
+            (0x0000_0080, trace_bytes("mc_keyUp")),
+        ],
+    );
+    b.push_tag(&Tag::PlaceObject2(PlaceObject2Tag {
+        is_move: false,
+        depth: 1,
+        character_id: Some(3),
+        matrix: Some(Matrix::IDENTITY),
+        color_transform: None,
+        ratio: None,
+        name: Some("mc".to_owned()),
+        clip_depth: None,
+        clip_actions_raw: Some(clip_actions_raw),
+    }));
+    b.push_tag(&Tag::PlaceObject2(PlaceObject2Tag {
+        is_move: false,
+        depth: 2,
+        character_id: Some(2),
+        matrix: Some(Matrix::IDENTITY),
+        color_transform: None,
+        ratio: None,
+        name: None,
+        clip_depth: None,
+        clip_actions_raw: None,
+    }));
+    b.push_tag(&Tag::ShowFrame);
+
+    // Frame 2: parent DoAction ("parent_frame2")
+    b.push_tag(&Tag::DoAction {
+        actions: trace_bytes("parent_frame2"),
+    });
+    b.push_tag(&Tag::ShowFrame);
+
+    // Frame 3: RemoveObject2(depth 1) removes "mc", plus parent DoAction ("parent_frame3"; stop())
+    b.push_tag(&Tag::RemoveObject2 { depth: 1 });
+    let mut ab_f3 = ActionBuilder::new();
+    ab_f3.push_str("parent_frame3").trace().stop();
+    b.push_tag(&Tag::DoAction {
+        actions: ab_f3.build(),
+    });
+    b.push_tag(&Tag::ShowFrame);
+
+    let swf = b.build();
+    let game_info = retro_game_info {
+        path: c"event_order_4_6_10.swf".as_ptr(),
+        data: swf.as_ptr().cast::<c_void>(),
+        size: swf.len(),
+        meta: core::ptr::null(),
+    };
+    assert!(retro_load_game(core::ptr::addr_of!(game_info)));
+
+    // Queue a keyDown event via the registered retro_keyboard_event_t callback and press pointer at center (0, 0)
+    let kb_cb = FRONTEND.lock().unwrap().keyboard_cb.unwrap();
+    kb_cb(true, 65, u32::from(b'a'), 0);
+    {
+        let mut fe = FRONTEND.lock().unwrap();
+        fe.pointer_x = 0;
+        fe.pointer_y = 0;
+        fe.pointer_pressed = true;
+    }
+
+    // Run Frame 1
+    retro_run();
+    {
+        let mut fe = FRONTEND.lock().unwrap();
+        let traces: Vec<String> = fe
+            .logs
+            .drain(..)
+            .map(|(_, s)| s.trim().to_owned())
+            .collect();
+        // Verify:
+        // 1. initialize & construct run before parent_frame1
+        // 2. load runs AFTER parent_frame1 and BEFORE mc_own_frame1
+        // 3. immediate keyDown, mouseDown, and button press handlers run on the same frame
+        // 4. rendering happens after load & mc_own_frame1 (center pixel is red 0x00FF0000)
+        assert_eq!(
+            traces,
+            vec![
+                "[trace] mc_initialize",
+                "[trace] mc_construct",
+                "[trace] parent_frame1",
+                "[trace] mc_load",
+                "[trace] mc_own_frame1",
+                "[trace] mc_keyDown",
+                "[trace] mc_mouseDown",
+                "[trace] btn_press",
+            ]
+        );
+        assert_eq!(fe.video_frames.last().unwrap()[80 * 200 + 100], 0x00FF_0000);
+    }
+
+    // Queue keyUp and pointer move + release on Frame 2
+    kb_cb(false, 65, u32::from(b'a'), 0);
+    {
+        let mut fe = FRONTEND.lock().unwrap();
+        fe.pointer_x = 100;
+        fe.pointer_y = 100;
+        fe.pointer_pressed = false;
+    }
+
+    // Run Frame 2
+    retro_run();
+    {
+        let mut fe = FRONTEND.lock().unwrap();
+        let traces: Vec<String> = fe
+            .logs
+            .drain(..)
+            .map(|(_, s)| s.trim().to_owned())
+            .collect();
+        assert_eq!(
+            traces,
+            vec![
+                "[trace] mc_enterFrame",
+                "[trace] parent_frame2",
+                "[trace] mc_keyUp",
+                "[trace] mc_mouseMove",
+                "[trace] mc_mouseUp",
+                "[trace] btn_release",
+            ]
+        );
+    }
+
+    // Run Frame 3 (clip is removed by RemoveObject2(depth 1))
+    retro_run();
+    {
+        let mut fe = FRONTEND.lock().unwrap();
+        let traces: Vec<String> = fe
+            .logs
+            .drain(..)
+            .map(|(_, s)| s.trim().to_owned())
+            .collect();
+        // Verify: unload runs in the first frame the clip is gone, BEFORE parent_frame3!
+        assert_eq!(traces, vec!["[trace] mc_unload", "[trace] parent_frame3"]);
+    }
+
+    retro_unload_game();
+    retro_deinit();
+}
+
+/// TSD 4.6 items 1, 2, 3, 4, 7, 8, 9, 14:
+/// - Item 1: SWF 1 and 2 files with legacy `PlaceObject` (tag 4) and `RemoveObject` (tag 5).
+/// - Item 2: Morph shapes with mixed fill types (solid + linear gradient).
+/// - Item 3: Nellymoser & Speex out-of-scope audio codecs log a warning and play silence.
+/// - Item 4: Bitmap smoothing exists only from SWF 8 (SWF 7 uses nearest-neighbor even if `smoothed = true`).
+/// - Item 7 & 8: Playhead changes made by a script (`gotoAndStop` by label) run target frame scripts
+///   and never run scripts on skipped intermediate frames; invalid frame numbers (`<= 0`) are ignored.
+#[test]
+#[allow(clippy::too_many_lines)]
+fn e2e_hard_area_swf1_swf2_morph_mixed_fills_nellymoser_speex_and_skipped_frames_via_abi() {
+    let _guard = E2E_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    reset_frontend();
+    init_abi_callbacks();
+
+    // 1. TSD 4.6 item 1: SWF 1 and SWF 2 files with PlaceObject (tag 4) and RemoveObject (tag 5)
+    for ver in [1_u8, 2_u8] {
+        reset_frontend();
+        let mut b = SwfBuilder::new(ver, 100, 100, 30.0, 2);
+        b.push_tag(&Tag::SetBackgroundColor {
+            r: 0x00,
+            g: 0x00,
+            b: 0x80,
+        });
+        b.push_tag(&Tag::DefineShape(ShapeDef {
+            id: 1,
+            version: 1,
+            bounds: Rect {
+                x_min: 400,
+                x_max: 1600,
+                y_min: 400,
+                y_max: 1600,
+            },
+            fill_styles: vec![FillStyle::Solid(Rgba::rgb(0xFF, 0xFF, 0x00))],
+            line_styles: Vec::new(),
+            records: rect_shape_records(400, 400, 1200, 1200),
+        }));
+        b.push_tag(&Tag::PlaceObject(PlaceObjectTag {
+            character_id: 1,
+            depth: 1,
+            matrix: Matrix::IDENTITY,
+            color_transform: None,
+        }));
+        b.push_tag(&Tag::ShowFrame);
+        b.push_tag(&Tag::RemoveObject {
+            character_id: 1,
+            depth: 1,
+        });
+        b.push_tag(&Tag::ShowFrame);
+        let swf = b.build();
+
+        let game_info = retro_game_info {
+            path: c"swf1_2_place_remove.swf".as_ptr(),
+            data: swf.as_ptr().cast::<c_void>(),
+            size: swf.len(),
+            meta: core::ptr::null(),
+        };
+        assert!(retro_load_game(core::ptr::addr_of!(game_info)));
+        retro_run(); // Frame 1: yellow square present at center (50, 50)
+        retro_run(); // Frame 2: RemoveObject removed square, center is navy blue (0x00000080)
+        let fe = FRONTEND.lock().unwrap();
+        assert_eq!(fe.video_frames[0][50 * 100 + 50], 0x00FF_FF00);
+        assert_eq!(fe.video_frames[1][50 * 100 + 50], 0x0000_0080);
+        drop(fe);
+        retro_unload_game();
+    }
+
+    // 2. TSD 4.6 item 2 & item 3: Morph shape with linear gradient fill + Nellymoser/Speex warning & silence
+    reset_frontend();
+    let mut b_ms = SwfBuilder::new(8, 100, 100, 30.0, 2);
+    b_ms.push_tag(&Tag::SetBackgroundColor {
+        r: 0x10,
+        g: 0x10,
+        b: 0x10,
+    });
+    let gmat = Matrix {
+        scale_x_fp16: 2000,
+        scale_y_fp16: 2000,
+        rotate_skew0_fp16: 0,
+        rotate_skew1_fp16: 0,
+        translate_x_twips: 1000,
+        translate_y_twips: 1000,
+    };
+    b_ms.push_tag(&Tag::DefineMorphShape(MorphShapeDef {
+        id: 1,
+        version: 1,
+        start_bounds: Rect {
+            x_min: 200,
+            x_max: 1800,
+            y_min: 200,
+            y_max: 1800,
+        },
+        end_bounds: Rect {
+            x_min: 200,
+            x_max: 1800,
+            y_min: 200,
+            y_max: 1800,
+        },
+        start_fill_styles: vec![FillStyle::LinearGradient {
+            matrix: gmat,
+            stops: vec![
+                GradientStop {
+                    ratio: 0,
+                    color: Rgba::rgb(0xFF, 0x00, 0x00),
+                },
+                GradientStop {
+                    ratio: 255,
+                    color: Rgba::rgb(0xFF, 0x00, 0x00),
+                },
+            ],
+        }],
+        end_fill_styles: vec![FillStyle::LinearGradient {
+            matrix: gmat,
+            stops: vec![
+                GradientStop {
+                    ratio: 0,
+                    color: Rgba::rgb(0x00, 0xFF, 0x00),
+                },
+                GradientStop {
+                    ratio: 255,
+                    color: Rgba::rgb(0x00, 0xFF, 0x00),
+                },
+            ],
+        }],
+        start_line_styles: Vec::new(),
+        end_line_styles: Vec::new(),
+        start_records: rect_shape_records(200, 200, 1600, 1600),
+        end_records: rect_shape_records(200, 200, 1600, 1600),
+    }));
+    b_ms.push_tag(&Tag::DefineSound(SoundDef {
+        id: 10,
+        format: SoundFormat::Nellymoser,
+        rate_code: 2,
+        is_16bit: true,
+        is_stereo: false,
+        sample_count: 100,
+        data: vec![0xAA; 64],
+    }));
+    b_ms.push_tag(&Tag::SoundStreamHead(SoundStreamHeadDef {
+        version: 2,
+        playback_rate_code: 3,
+        playback_is_16bit: true,
+        playback_is_stereo: true,
+        stream_format: SoundFormat::Speex,
+        stream_rate_code: 1,
+        stream_is_16bit: true,
+        stream_is_stereo: false,
+        stream_sample_count: 320,
+        latency_seek: None,
+    }));
+    b_ms.push_tag(&Tag::PlaceObject2(PlaceObject2Tag {
+        is_move: false,
+        depth: 1,
+        character_id: Some(1),
+        matrix: Some(Matrix::IDENTITY),
+        color_transform: None,
+        ratio: Some(0),
+        name: None,
+        clip_depth: None,
+        clip_actions_raw: None,
+    }));
+    b_ms.push_tag(&Tag::StartSound {
+        sound_id: 10,
+        sound_info: SoundInfo {
+            sync_stop: false,
+            sync_no_multiple: false,
+            in_point: None,
+            out_point: None,
+            loop_count: None,
+            envelope: Vec::new(),
+        },
+    });
+    b_ms.push_tag(&Tag::ShowFrame);
+    b_ms.push_tag(&Tag::PlaceObject2(PlaceObject2Tag {
+        is_move: true,
+        depth: 1,
+        character_id: None,
+        matrix: None,
+        color_transform: None,
+        ratio: Some(65535),
+        name: None,
+        clip_depth: None,
+        clip_actions_raw: None,
+    }));
+    b_ms.push_tag(&Tag::ShowFrame);
+    let swf_ms = b_ms.build();
+    let gi_ms = retro_game_info {
+        path: c"morph_nellymoser_speex.swf".as_ptr(),
+        data: swf_ms.as_ptr().cast::<c_void>(),
+        size: swf_ms.len(),
+        meta: core::ptr::null(),
+    };
+    assert!(retro_load_game(core::ptr::addr_of!(gi_ms)));
+    retro_run();
+    retro_run();
+    {
+        let fe = FRONTEND.lock().unwrap();
+        assert_eq!(fe.video_frames[0][50 * 100 + 50], 0x00FF_0000);
+        assert_eq!(fe.video_frames[1][50 * 100 + 50], 0x0000_FF00);
+        let has_nelly = fe
+            .logs
+            .iter()
+            .any(|(_, msg)| msg.contains("Nellymoser") && msg.contains("playing silence"));
+        let has_speex = fe
+            .logs
+            .iter()
+            .any(|(_, msg)| msg.contains("Speex") && msg.contains("playing silence"));
+        assert!(has_nelly);
+        assert!(has_speex);
+        assert!(fe.audio_batches[0].iter().all(|&s| s == 0));
+    }
+    retro_unload_game();
+
+    // 3. TSD 4.6 item 4: Bitmap smoothing exists only from SWF 8
+    let mut raw_2x2 = Vec::new();
+    // Row 0: pure red, pure blue; Row 1: pure red, pure blue
+    for _y in 0..2 {
+        raw_2x2.extend_from_slice(&[255, 255, 0, 0]);
+        raw_2x2.extend_from_slice(&[255, 0, 0, 255]);
+    }
+    let zlib_2x2 = miniz_oxide::deflate::compress_to_vec_zlib(&raw_2x2, 6);
+    let build_bmp_movie = |ver: u8| -> Vec<u8> {
+        let mut b = SwfBuilder::new(ver, 80, 40, 30.0, 1);
+        b.push_tag(&Tag::SetBackgroundColor { r: 0, g: 0, b: 0 });
+        b.push_tag(&Tag::DefineBitsLossless(LosslessBitmapDef {
+            id: 1,
+            version: 2,
+            format: 5,
+            width: 2,
+            height: 2,
+            color_table_size: None,
+            zlib_data: zlib_2x2.clone(),
+        }));
+        b.push_tag(&Tag::DefineShape(ShapeDef {
+            id: 2,
+            version: 3,
+            bounds: Rect {
+                x_min: 0,
+                x_max: 1600,
+                y_min: 0,
+                y_max: 800,
+            },
+            fill_styles: vec![FillStyle::Bitmap {
+                bitmap_id: 1,
+                matrix: Matrix {
+                    scale_x_fp16: 40 * 65536 * 20,
+                    scale_y_fp16: 20 * 65536 * 20,
+                    rotate_skew0_fp16: 0,
+                    rotate_skew1_fp16: 0,
+                    translate_x_twips: 0,
+                    translate_y_twips: 0,
+                },
+                repeating: false,
+                smoothed: true,
+            }],
+            line_styles: Vec::new(),
+            records: rect_shape_records(0, 0, 1600, 800),
+        }));
+        b.push_tag(&Tag::PlaceObject2(PlaceObject2Tag {
+            is_move: false,
+            depth: 1,
+            character_id: Some(2),
+            matrix: Some(Matrix::IDENTITY),
+            color_transform: None,
+            ratio: None,
+            name: None,
+            clip_depth: None,
+            clip_actions_raw: None,
+        }));
+        b.push_tag(&Tag::ShowFrame);
+        b.build()
+    };
+    reset_frontend();
+    let swf_v7 = build_bmp_movie(7);
+    let gi_v7 = retro_game_info {
+        path: c"bmp_v7.swf".as_ptr(),
+        data: swf_v7.as_ptr().cast::<c_void>(),
+        size: swf_v7.len(),
+        meta: core::ptr::null(),
+    };
+    assert!(retro_load_game(core::ptr::addr_of!(gi_v7)));
+    retro_run();
+    let v7_mid_px = FRONTEND.lock().unwrap().video_frames[0][20 * 80 + 35];
+    retro_unload_game();
+
+    reset_frontend();
+    let swf_v8 = build_bmp_movie(8);
+    let gi_v8 = retro_game_info {
+        path: c"bmp_v8.swf".as_ptr(),
+        data: swf_v8.as_ptr().cast::<c_void>(),
+        size: swf_v8.len(),
+        meta: core::ptr::null(),
+    };
+    assert!(retro_load_game(core::ptr::addr_of!(gi_v8)));
+    retro_run();
+    let v8_mid_px = FRONTEND.lock().unwrap().video_frames[0][20 * 80 + 35];
+    retro_unload_game();
+    // In SWF 7, nearest-neighbor keeps pixel x=35 pure red (0x00FF0000); in SWF 8, bilinear smoothing blends red and blue!
+    assert_eq!(v7_mid_px, 0x00FF_0000);
+    assert_ne!(v8_mid_px, 0x00FF_0000);
+
+    // 4. TSD 4.6 item 7 & 8: Playhead jump by label skips intermediate frame scripts and ignores invalid frame numbers (<= 0)
+    reset_frontend();
+    let mut b_skip = SwfBuilder::new(8, 100, 100, 30.0, 3);
+    let mut ab_f1 = ActionBuilder::new();
+    ab_f1
+        .push_str("reached_frame1")
+        .trace()
+        .goto_label("frame_three");
+    b_skip.push_tag(&Tag::DoAction {
+        actions: ab_f1.build(),
+    });
+    b_skip.push_tag(&Tag::ShowFrame);
+
+    // Frame 2 (must NEVER execute its script!)
+    let mut ab_f2 = ActionBuilder::new();
+    ab_f2.push_str("ERROR_unreached_frame2").trace();
+    b_skip.push_tag(&Tag::DoAction {
+        actions: ab_f2.build(),
+    });
+    b_skip.push_tag(&Tag::ShowFrame);
+
+    // Frame 3 ("frame_three")
+    b_skip.push_tag(&Tag::FrameLabel {
+        name: "frame_three".to_owned(),
+        is_anchor: false,
+    });
+    let mut ab_f3 = ActionBuilder::new();
+    ab_f3
+        .push_str("reached_frame3")
+        .trace()
+        // gotoAndStop(0) and gotoAndStop(-5) must be ignored
+        .push_i32(0)
+        .goto_frame2(false)
+        .push_i32(-5)
+        .goto_frame2(false)
+        .push_str("_currentframe")
+        .get_var()
+        .trace()
+        .stop();
+    b_skip.push_tag(&Tag::DoAction {
+        actions: ab_f3.build(),
+    });
+    b_skip.push_tag(&Tag::ShowFrame);
+
+    let swf_skip = b_skip.build();
+    let gi_skip = retro_game_info {
+        path: c"skip_frame2.swf".as_ptr(),
+        data: swf_skip.as_ptr().cast::<c_void>(),
+        size: swf_skip.len(),
+        meta: core::ptr::null(),
+    };
+    assert!(retro_load_game(core::ptr::addr_of!(gi_skip)));
+    retro_run();
+    {
+        let fe = FRONTEND.lock().unwrap();
+        let traces: Vec<String> = fe
+            .logs
+            .iter()
+            .map(|(_, s)| s.trim().to_owned())
+            .collect();
+        assert_eq!(
+            traces,
+            vec![
+                "[trace] reached_frame1",
+                "[trace] reached_frame3",
+                "[trace] 3",
+            ]
+        );
+    }
+    retro_unload_game();
     retro_deinit();
 }
