@@ -730,8 +730,7 @@ fn ruffle_swf_oracle_crosschecks_swfbuilder_tag_counts() {
         let our_movie = Movie::parse(&bytes).expect("swfr_swf Movie::parse must succeed");
         let ruffle_buf =
             swf::decompress_swf(&bytes[..]).expect("Ruffle swf::decompress_swf must succeed");
-        let ruffle_movie =
-            swf::parse_swf(&ruffle_buf).expect("Ruffle swf::parse_swf must succeed");
+        let ruffle_movie = swf::parse_swf(&ruffle_buf).expect("Ruffle swf::parse_swf must succeed");
 
         assert_eq!(ruffle_movie.header.version(), our_movie.header.version);
         assert_eq!(
@@ -748,4 +747,3 @@ fn ruffle_swf_oracle_crosschecks_swfbuilder_tag_counts() {
         assert_eq!(ruffle_movie.tags.len(), our_non_end_count);
     }
 }
-
