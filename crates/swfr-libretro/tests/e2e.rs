@@ -2075,3 +2075,147 @@ fn e2e_hard_area_swf1_swf2_morph_mixed_fills_nellymoser_speex_and_skipped_frames
     retro_unload_game();
     retro_deinit();
 }
+
+#[test]
+fn e2e_real_world_flash8_placeobject3_definefunction2_preloader_and_sprite_movement() {
+    let _guard = E2E_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    reset_frontend();
+    init_abi_callbacks();
+
+    let mut b = SwfBuilder::new(8, 120, 80, 30.0, 1);
+    b.push_tag(&Tag::SetBackgroundColor(Rgb::new(0, 0, 0)));
+
+    // Character 1: 20x20 red square
+    b.push_tag(&Tag::DefineShape(rect_shape_def(
+        1,
+        0,
+        0,
+        20 * 20,
+        20 * 20,
+        Rgba::rgb(255, 0, 0),
+    )));
+
+    // Character 2: Sprite with 2 frames (frame 1 traces "sp_f1", frame 2 traces "sp_f2" + stop)
+    let mut sp_f1 = ActionBuilder::new();
+    sp_f1.push_str("sp_f1").trace();
+    let mut sp_f2 = ActionBuilder::new();
+    sp_f2.push_str("sp_f2").trace().stop();
+    b.push_tag(&Tag::DefineSprite(swfr_swf::SpriteDef {
+        id: 2,
+        frame_count: 2,
+        tags: vec![
+            Tag::PlaceObject2(PlaceObject2Tag {
+                is_move: false,
+                depth: 1,
+                character_id: Some(1),
+                matrix: Some(Matrix::IDENTITY),
+                color_transform: None,
+                ratio: None,
+                name: None,
+                clip_depth: None,
+                clip_actions_raw: None,
+            }),
+            Tag::DoAction {
+                actions: sp_f1.build(),
+            },
+            Tag::ShowFrame,
+            Tag::DoAction {
+                actions: sp_f2.build(),
+            },
+            Tag::ShowFrame,
+            Tag::End,
+        ],
+    }));
+
+    // PlaceObject3 (tag 70) raw payload with has_character(0x02) | has_matrix(0x04) | has_name(0x20)
+    // and flags2 = has_filter_list(0x01) | has_blend_mode(0x02)
+    let mut po3 = Vec::new();
+    po3.push(0x26); // has_character | has_matrix | has_name
+    po3.push(0x03); // has_filter_list | has_blend_mode
+    po3.extend_from_slice(&1_u16.to_le_bytes()); // depth = 1
+    po3.extend_from_slice(&2_u16.to_le_bytes()); // character_id = 2
+    po3.push(0x00); // Matrix::IDENTITY (all 0 bits, byte-aligned)
+    po3.extend_from_slice(b"hero\0"); // name = "hero"
+    // FilterList: count = 1, DropShadowFilter (id = 0, 23 bytes)
+    po3.push(1);
+    po3.push(0);
+    po3.extend_from_slice(&[0u8; 23]);
+    // BlendMode = 1 (normal)
+    po3.push(1);
+    b.push_raw_tag(70, po3);
+
+    // Build DefineFunction2 (0x8E): function moveHero(targetX) { _root.hero._x = targetX; }
+    // PreloadRootFlag (0x0040) -> r1 = _root, param 0 in r2 = targetX
+    let mut fn_body = Vec::new();
+    // Push r1 (_root), "hero" -> GetMember -> Push "_x", r2 (targetX) -> SetMember
+    fn_body.extend_from_slice(&[
+        0x96, 8, 0, 0x04, 1, 0x00, b'h', b'e', b'r', b'o', 0x00, // Push r1, "hero"
+        0x4E, // GetMember
+        0x96, 6, 0, 0x00, b'_', b'x', 0x00, 0x04, 2,    // Push "_x", r2
+        0x4F, // SetMember
+    ]);
+    let mut act = Vec::new();
+    // DefineFunction2 header
+    let mut df2 = Vec::new();
+    df2.extend_from_slice(b"moveHero\0");
+    df2.extend_from_slice(&1_u16.to_le_bytes()); // num_params = 1
+    df2.push(4); // register_count = 4
+    df2.extend_from_slice(&0x0040_u16.to_le_bytes()); // PreloadRootFlag -> r1
+    df2.push(2); // param 0 register = r2
+    df2.extend_from_slice(b"targetX\0");
+    df2.extend_from_slice(&(fn_body.len() as u16).to_le_bytes());
+    act.push(0x8E);
+    act.extend_from_slice(&(df2.len() as u16).to_le_bytes());
+    act.extend_from_slice(&df2);
+    act.extend_from_slice(&fn_body);
+
+    // Call moveHero(60) and trace(_root.getBytesLoaded() == _root.getBytesTotal())
+    let mut call_ab = ActionBuilder::new();
+    call_ab
+        .push_i32(60)
+        .push_i32(1)
+        .push_str("moveHero")
+        .call_function()
+        .pop()
+        .push_i32(0)
+        .push_str("_root")
+        .get_var()
+        .push_str("getBytesLoaded")
+        .call_method()
+        .push_i32(0)
+        .push_str("_root")
+        .get_var()
+        .push_str("getBytesTotal")
+        .call_method()
+        .equals2()
+        .trace();
+    act.extend_from_slice(&call_ab.build());
+
+    b.push_tag(&Tag::DoAction { actions: act });
+    b.push_tag(&Tag::ShowFrame);
+    let swf = b.build();
+
+    let gi = retro_game_info {
+        path: c"flash8_realworld.swf".as_ptr(),
+        data: swf.as_ptr().cast::<c_void>(),
+        size: swf.len(),
+        meta: core::ptr::null(),
+    };
+    assert!(retro_load_game(core::ptr::addr_of!(gi)));
+    retro_run();
+    retro_run();
+
+    let fe = FRONTEND.lock().unwrap();
+    let traces: Vec<String> = fe.logs.iter().map(|(_, s)| s.trim().to_owned()).collect();
+    assert!(traces.contains(&"[trace] sp_f1".to_owned()), "{traces:?}");
+    assert!(traces.contains(&"[trace] sp_f2".to_owned()), "{traces:?}");
+    assert!(traces.contains(&"[trace] true".to_owned()), "{traces:?}");
+    // Hero sprite was moved to x = 60..80, y = 0..20 (red = 0x00FF0000), while x = 10 is black (0x00000000)
+    assert_eq!(fe.video_frames[0][10 * 120 + 70], 0x00FF_0000);
+    assert_eq!(fe.video_frames[0][10 * 120 + 10], 0x0000_0000);
+    drop(fe);
+
+    retro_unload_game();
+    retro_deinit();
+}
+

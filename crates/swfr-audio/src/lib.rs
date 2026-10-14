@@ -371,7 +371,7 @@ impl AudioMixer {
         }
     }
 
-    /// Registers a [`SoundDef`] (`DefineSound`) in the mixer's bank (decoded lazily on first playback).
+    /// Registers a [`SoundDef`] (`DefineSound`) in the mixer's bank for lazy decoding on first play.
     pub fn register_sound(&mut self, snd: &SoundDef) {
         self.raw_sounds.insert(snd.id, snd.clone());
     }
@@ -388,13 +388,13 @@ impl AudioMixer {
         if self.voices.len() >= MAX_VOICES {
             self.voices.remove(0);
         }
-        let samples = if let Some(cached) = self.defined_sounds.get(&sound_id) {
-            Arc::clone(cached)
-        } else if let Some(snd) = self.raw_sounds.get(&sound_id) {
-            let pcm: Arc<[[i16; 2]]> = Arc::from(decode_sound_def(snd));
-            self.defined_sounds.insert(sound_id, Arc::clone(&pcm));
-            pcm
-        } else {
+        if !self.defined_sounds.contains_key(&sound_id) {
+            if let Some(snd) = self.raw_sounds.get(&sound_id) {
+                let pcm: Arc<[[i16; 2]]> = Arc::from(decode_sound_def(snd));
+                self.defined_sounds.insert(sound_id, pcm);
+            }
+        }
+        let Some(samples) = self.defined_sounds.get(&sound_id).map(Arc::clone) else {
             return;
         };
         if samples.is_empty() {

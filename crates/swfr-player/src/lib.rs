@@ -9,7 +9,7 @@
 use swfr_audio::AudioMixer;
 use swfr_avm1::Avm1;
 use swfr_render::Renderer;
-use swfr_scene::{Character, FrameEvents, Stage};
+use swfr_scene::{FrameEvents, Stage};
 use swfr_swf::{Movie, Tag};
 
 /// Fixed output audio sample rate in Hz (TSD 2.5, 2.8).
@@ -384,11 +384,7 @@ impl Player {
             .saturating_mul(250_000)
             .max(10_000);
         let mut audio = AudioMixer::new();
-        for ch in stage.dictionary.values() {
-            if let Character::Sound(snd) = ch {
-                audio.register_sound(snd);
-            }
-        }
+        Self::register_sounds(&movie.tags, &mut audio);
 
         let width = stage_width.saturating_mul(effective_scale);
         let height = stage_height.saturating_mul(effective_scale);
@@ -752,11 +748,7 @@ impl Player {
                 .saturating_mul(250_000)
                 .max(10_000);
             rt.audio = AudioMixer::new();
-            for ch in rt.stage.dictionary.values() {
-                if let Character::Sound(snd) = ch {
-                    rt.audio.register_sound(snd);
-                }
-            }
+            Self::register_sounds(&rt.movie.tags, &mut rt.audio);
         } else {
             #[cfg(feature = "m0-stub")]
             self.render_color_bars();
@@ -834,9 +826,19 @@ impl Player {
         for (sid, info) in events.start_sounds {
             audio.start_sound(sid, &info);
         }
-        for (target, code) in events.actions {
-            vm.execute_bytecode_for_target(&code, &target, stage);
+        for (clip_path, code) in events.actions {
+            vm.execute_bytecode_for_clip(&clip_path, &code, stage);
             Self::drain_vm_logs(vm, audio, trace_to_log, logs);
+        }
+    }
+
+    fn register_sounds(tags: &[Tag], audio: &mut AudioMixer) {
+        for tag in tags {
+            match tag {
+                Tag::DefineSound(snd) => audio.register_sound(snd),
+                Tag::DefineSprite(sp) => Self::register_sounds(&sp.tags, audio),
+                _ => {}
+            }
         }
     }
 
@@ -864,9 +866,6 @@ impl Player {
             });
         }
         audio.volume_percent = vm.sound_volume;
-        for (sid, info) in vm.sound_starts.drain(..) {
-            audio.start_sound(sid, &info);
-        }
         if vm.stop_sounds_requested {
             vm.stop_sounds_requested = false;
             audio.stop_all_sounds();

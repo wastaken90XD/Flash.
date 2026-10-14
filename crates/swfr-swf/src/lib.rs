@@ -864,8 +864,6 @@ pub enum Tag {
 pub struct Movie {
     /// Movie header.
     pub header: Header,
-    /// Declared uncompressed SWF file length in bytes (from the 8-byte preamble).
-    pub decompressed_len: u32,
     /// Top-level tags in stream order.
     pub tags: Vec<Tag>,
 }
@@ -942,7 +940,7 @@ impl Movie {
             Compression::Uncompressed => raw_bytes.get(8..).unwrap_or(&[]).to_vec(),
             Compression::Zlib => {
                 let compressed = raw_bytes.get(8..).unwrap_or(&[]);
-                miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(
+                let out = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(
                     compressed,
                     limits.max_decompressed_size,
                 )
@@ -951,7 +949,16 @@ impl Movie {
                     kind: ParseErrorKind::DecompressionError(
                         "zlib decompression failed or exceeded limit",
                     ),
-                })?
+                })?;
+                if out.len() > 32 * 1024 && out.len() > raw_bytes.len().saturating_mul(100) {
+                    return Err(ParseError {
+                        offset: 8,
+                        kind: ParseErrorKind::LimitExceeded(
+                            "zlib decompression ratio exceeds bomb limit",
+                        ),
+                    });
+                }
+                out
             }
             Compression::Lzma => {
                 // ZWS header: [0..4 sig+ver][4..8 uncomp_len][8..12 comp_len][12..17 lzma_props][17.. payload]
@@ -975,7 +982,9 @@ impl Movie {
                     offset: 12,
                     kind: ParseErrorKind::DecompressionError("LZMA decompression failed"),
                 })?;
-                if out.len() > limits.max_decompressed_size {
+                if out.len() > limits.max_decompressed_size
+                    || (out.len() > 32 * 1024 && out.len() > raw_bytes.len().saturating_mul(100))
+                {
                     return Err(ParseError {
                         offset: 12,
                         kind: ParseErrorKind::LimitExceeded(
@@ -1004,11 +1013,7 @@ impl Movie {
         };
 
         let tags = parse_tag_stream(&mut reader, version, limits)?;
-        Ok(Self {
-            header,
-            decompressed_len: u32::try_from(file_len).unwrap_or(u32::MAX),
-            tags,
-        })
+        Ok(Self { header, tags })
     }
 }
 
@@ -1040,13 +1045,15 @@ fn parse_tag_stream(
         })?;
         let tag = match decode_tag(code, payload, swf_version, limits, tag_offset) {
             Ok(t) => t,
-            Err(e) if matches!(e.kind, ParseErrorKind::LimitExceeded(_)) || code == 77 => {
-                return Err(e);
+            Err(err) => {
+                if matches!(err.kind, ParseErrorKind::LimitExceeded(_)) {
+                    return Err(err);
+                }
+                Tag::Unknown {
+                    code,
+                    raw: payload.to_vec(),
+                }
             }
-            Err(_) => Tag::Unknown {
-                code,
-                raw: payload.to_vec(),
-            },
         };
         let is_end = tag == Tag::End;
         tags.push(tag);
@@ -1945,8 +1952,8 @@ fn decode_morph_shape(
 }
 
 fn skip_filter_list(r: &mut Reader<'_>) -> Result<(), ParseError> {
-    let count = usize::from(r.u8()?);
-    for _ in 0..count {
+    let filter_count = usize::from(r.u8()?);
+    for _ in 0..filter_count {
         let filter_id = r.u8()?;
         let skip_bytes = match filter_id {
             0 => 23, // DropShadowFilter
@@ -1964,8 +1971,8 @@ fn skip_filter_list(r: &mut Reader<'_>) -> Result<(), ParseError> {
                 let my = usize::from(r.u8()?);
                 mx.saturating_mul(my).saturating_mul(4).saturating_add(13)
             }
-            6 => 80, // ColorMatrixFilter (20 * f32)
-            _ => return Ok(()),
+            6 => 80, // ColorMatrixFilter
+            _ => break,
         };
         let _ = r.bytes(skip_bytes)?;
     }
@@ -2110,35 +2117,19 @@ fn decode_font(
         });
     }
 
-    let offset_table_start = r.position();
-    for _ in 0..num_glyphs {
+    for _ in 0..=num_glyphs {
         if wide_offsets {
             let _off = r.u32()?;
         } else {
             let _off = r.u16()?;
         }
     }
-    let code_table_offset = if wide_offsets {
-        usize::try_from(r.u32()?).unwrap_or(0)
-    } else {
-        usize::from(r.u16()?)
-    };
     let mut glyphs = Vec::with_capacity(num_glyphs.min(256));
     for _ in 0..num_glyphs {
         glyphs.push(decode_shape_records(r, 1, limits, tag_offset)?);
     }
-    let expected_code_pos = offset_table_start.saturating_add(code_table_offset);
-    if code_table_offset > 0 && expected_code_pos > r.position() {
-        let skip = expected_code_pos.saturating_sub(r.position());
-        if skip <= r.remaining() {
-            let _ = r.bytes(skip);
-        }
-    }
     let mut codes = Vec::with_capacity(num_glyphs.min(256));
     for _ in 0..num_glyphs {
-        if r.is_empty() {
-            break;
-        }
         if wide_codes {
             codes.push(r.u16()?);
         } else {
