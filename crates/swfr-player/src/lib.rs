@@ -238,6 +238,27 @@ pub struct FrameOut<'a> {
     pub logs: &'a [LogLine],
 }
 
+/// Live runtime diagnostics snapshot for the loaded SWF movie.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MovieDiagnostics {
+    /// SWF format version (`1..=43`).
+    pub swf_version: u8,
+    /// Whether the SWF uses AVM2 (`FileAttributes.actionscript3` or `DoABC` tags 72/82).
+    pub is_avm2: bool,
+    /// Current 1-based root timeline frame (`1..=total_frames`).
+    pub current_frame: u16,
+    /// Total frames on the root timeline.
+    pub total_frames: u16,
+    /// Whether the root timeline is currently playing (`true`) or stopped (`false`).
+    pub playing: bool,
+    /// Total frames stepped by `run_frame` since load or reset.
+    pub tick_count: u64,
+    /// Total active placed display objects across root and nested sprite timelines.
+    pub active_objects: usize,
+    /// Total dictionary character definitions registered.
+    pub dictionary_count: usize,
+}
+
 /// Errors returned when constructing or loading a [`Player`] (TSD 2.6, 2.11, 3.14).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlayerError {
@@ -808,6 +829,142 @@ impl Player {
         }
     }
 
+    /// Returns a live runtime diagnostic snapshot of the loaded SWF movie.
+    #[must_use]
+    pub fn diagnostics(&self) -> Option<MovieDiagnostics> {
+        let rt = self.runtime.as_ref()?;
+        let is_avm2 = rt.movie.tags.iter().any(|t| {
+            matches!(
+                t,
+                Tag::FileAttributes {
+                    actionscript3: true,
+                    ..
+                }
+            ) || matches!(t, Tag::Unknown { code: 72 | 82, .. })
+        });
+        Some(MovieDiagnostics {
+            swf_version: rt.movie.header.version,
+            is_avm2,
+            current_frame: rt.stage.root.current_frame.saturating_add(1),
+            total_frames: rt.stage.root.frame_count,
+            playing: rt.stage.root.playing,
+            tick_count: self.frame_count,
+            active_objects: rt.stage.active_object_count(),
+            dictionary_count: rt.stage.dictionary.len(),
+        })
+    }
+
+    /// Appends a diagnostic summary line to `self.logs` (invoked when the user toggles the HUD).
+    pub fn emit_diagnostics_log(&mut self) {
+        if let Some(diag) = self.diagnostics() {
+            let vm_tag = if diag.is_avm2 {
+                "AVM2/AS3"
+            } else {
+                "AVM1/AS1-2"
+            };
+            let state_tag = if diag.playing { "PLAY" } else { "STOP" };
+            self.logs.push(LogLine {
+                level: LogLevel::Info,
+                message: format!(
+                    "[swfr] HUD: SWF v{} ({}), frame {}/{} ({}), tick {}, objects {}, defs {}",
+                    diag.swf_version,
+                    vm_tag,
+                    diag.current_frame,
+                    diag.total_frames,
+                    state_tag,
+                    diag.tick_count,
+                    diag.active_objects,
+                    diag.dictionary_count
+                ),
+            });
+        }
+    }
+
+    /// Overlays a live diagnostic HUD banner at the top of `self.frame.xrgb`.
+    ///
+    /// Shows SWF version, VM kind (`AVM1` vs `AVM2-AS3!`), current/total frame,
+    /// play/stop status, live frame tick counter, active object count, and a
+    /// blinking heartbeat square so the user can verify whether the SWF is alive.
+    #[allow(clippy::arithmetic_side_effects)]
+    pub fn draw_debug_hud(&mut self) {
+        let Some(diag) = self.diagnostics() else {
+            return;
+        };
+        let w = self.frame.width as i32;
+        let h = self.frame.height as i32;
+        if w < 32 || h < 12 {
+            return;
+        }
+        let vm_tag = if diag.is_avm2 { "AVM2-AS3!" } else { "AVM1" };
+        let state_tag = if diag.playing { "PLAY" } else { "STOP" };
+        let text = format!(
+            "SWF{} {} F:{}/{} {} T:{} OBJ:{}",
+            diag.swf_version,
+            vm_tag,
+            diag.current_frame,
+            diag.total_frames,
+            state_tag,
+            diag.tick_count,
+            diag.active_objects
+        );
+        let bg_color = if diag.is_avm2 {
+            0x0058_1818_u32
+        } else {
+            0x0010_1824_u32
+        };
+        let fg_color = if diag.is_avm2 {
+            0x00FF_CC44_u32
+        } else {
+            0x0044_FF88_u32
+        };
+        let banner_h = 11.min(h);
+        for py in 0..banner_h {
+            for px in 0..w {
+                let idx = (py * w + px) as usize;
+                if let Some(slot) = self.frame.xrgb.get_mut(idx) {
+                    *slot = bg_color;
+                }
+            }
+        }
+        // Blinking heartbeat indicator at (2..8, 2..9)
+        let hb_color = if (diag.tick_count & 8) == 0 {
+            0x0000_FF66_u32
+        } else {
+            0x0000_88FF_u32
+        };
+        for py in 2..9.min(banner_h) {
+            for px in 2..8.min(w) {
+                let idx = (py * w + px) as usize;
+                if let Some(slot) = self.frame.xrgb.get_mut(idx) {
+                    *slot = hb_color;
+                }
+            }
+        }
+        let mut cursor_x = 11_i32;
+        for ch in text.chars() {
+            if cursor_x + 5 >= w {
+                break;
+            }
+            let glyph = hud_glyph_5x7(ch);
+            for (row, &bits) in glyph.iter().enumerate() {
+                let py = 2 + row as i32;
+                if py >= banner_h {
+                    continue;
+                }
+                for col in 0..5_i32 {
+                    if (bits & (1 << (4 - col))) != 0 {
+                        let px = cursor_x + col;
+                        let idx = (py * w + px) as usize;
+                        if let Some(slot) = self.frame.xrgb.get_mut(idx) {
+                            *slot = fg_color;
+                        }
+                    }
+                }
+            }
+            cursor_x += 6;
+        }
+    }
+
     fn dispatch_events(
         events: FrameEvents,
         stage: &mut Stage,
@@ -828,6 +985,10 @@ impl Player {
         }
         for (clip_path, code) in events.actions {
             vm.execute_bytecode_for_clip(&clip_path, &code, stage);
+            Self::drain_vm_logs(vm, audio, trace_to_log, logs);
+        }
+        for (clip_path, cb_name) in events.clip_callbacks {
+            vm.invoke_clip_callback(&clip_path, cb_name, stage);
             Self::drain_vm_logs(vm, audio, trace_to_log, logs);
         }
     }
@@ -952,6 +1113,105 @@ impl Player {
                 }
             }
         }
+    }
+}
+
+const fn hud_glyph_5x7(ch: char) -> [u8; 7] {
+    match ch.to_ascii_uppercase() {
+        '0' => [
+            0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110,
+        ],
+        '1' => [
+            0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110,
+        ],
+        '2' => [
+            0b01110, 0b10001, 0b00001, 0b00110, 0b01000, 0b10000, 0b11111,
+        ],
+        '3' => [
+            0b11110, 0b00001, 0b00001, 0b01110, 0b00001, 0b00001, 0b11110,
+        ],
+        '4' => [
+            0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010,
+        ],
+        '5' => [
+            0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110,
+        ],
+        '6' => [
+            0b00110, 0b01000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110,
+        ],
+        '7' => [
+            0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000,
+        ],
+        '8' => [
+            0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110,
+        ],
+        '9' => [
+            0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00010, 0b01100,
+        ],
+        'A' => [
+            0b01110, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001,
+        ],
+        'B' => [
+            0b11110, 0b10001, 0b10001, 0b11110, 0b10001, 0b10001, 0b11110,
+        ],
+        'C' => [
+            0b01110, 0b10001, 0b10000, 0b10000, 0b10000, 0b10001, 0b01110,
+        ],
+        'D' => [
+            0b11100, 0b10010, 0b10001, 0b10001, 0b10001, 0b10010, 0b11100,
+        ],
+        'E' => [
+            0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b11111,
+        ],
+        'F' => [
+            0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b10000,
+        ],
+        'J' => [
+            0b00111, 0b00010, 0b00010, 0b00010, 0b10010, 0b10010, 0b01100,
+        ],
+        'L' => [
+            0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b11111,
+        ],
+        'M' => [
+            0b10001, 0b11011, 0b10101, 0b10101, 0b10001, 0b10001, 0b10001,
+        ],
+        'O' => [
+            0b01110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110,
+        ],
+        'P' => [
+            0b11110, 0b10001, 0b10001, 0b11110, 0b10000, 0b10000, 0b10000,
+        ],
+        'R' => [
+            0b11110, 0b10001, 0b10001, 0b11110, 0b10100, 0b10010, 0b10001,
+        ],
+        'S' => [
+            0b01111, 0b10000, 0b10000, 0b01110, 0b00001, 0b00001, 0b11110,
+        ],
+        'T' => [
+            0b11111, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100,
+        ],
+        'V' => [
+            0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01010, 0b00100,
+        ],
+        'W' => [
+            0b10001, 0b10001, 0b10001, 0b10101, 0b10101, 0b11011, 0b10001,
+        ],
+        'Y' => [
+            0b10001, 0b10001, 0b01010, 0b00100, 0b00100, 0b00100, 0b00100,
+        ],
+        ':' => [
+            0b00000, 0b00100, 0b00100, 0b00000, 0b00100, 0b00100, 0b00000,
+        ],
+        '/' => [
+            0b00001, 0b00010, 0b00010, 0b00100, 0b01000, 0b01000, 0b10000,
+        ],
+        '-' => [
+            0b00000, 0b00000, 0b00000, 0b11111, 0b00000, 0b00000, 0b00000,
+        ],
+        '!' => [
+            0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00000, 0b00100,
+        ],
+        _ => [0; 7],
     }
 }
 

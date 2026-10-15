@@ -1108,6 +1108,8 @@ impl Timeline {
 pub struct FrameEvents {
     /// Queued AVM1 bytecode blocks (`(target_path, bytecode)`).
     pub actions: Vec<(String, Vec<u8>)>,
+    /// Queued script property callback invocations (`(target_path, callback_name)`).
+    pub clip_callbacks: Vec<(String, &'static str)>,
     /// Queued event sound triggers (`(sound_id, SoundInfo)`).
     pub start_sounds: Vec<(u16, SoundInfo)>,
     /// Queued streaming audio header updates.
@@ -1132,6 +1134,8 @@ pub struct Stage {
     pub background_color: Rgba,
     /// Character dictionary keyed by `u16` character ID.
     pub dictionary: BTreeMap<u16, Character>,
+    /// Exported symbol linkage table (`lowercase_symbol_name -> character_id`) from `ExportAssets`.
+    pub exports: BTreeMap<String, u16>,
     /// Shared `JPEGTables` data for `DefineBits` tags.
     pub jpeg_tables: Option<Vec<u8>>,
     /// Font code table mapping (`font_id -> codes`) from `DefineFontInfo` / `DefineFontInfo2`.
@@ -1162,6 +1166,7 @@ impl Stage {
             fps,
             background_color: Rgba::rgb(255, 255, 255),
             dictionary: BTreeMap::new(),
+            exports: BTreeMap::new(),
             jpeg_tables: None,
             font_codes: BTreeMap::new(),
             root: Timeline::new(movie.header.frame_count, movie.tags.clone()),
@@ -1278,9 +1283,246 @@ impl Stage {
                     self.dictionary
                         .insert(snd.id, Character::Sound(snd.clone()));
                 }
+                Tag::ExportAssets { exports } => {
+                    for (cid, name) in exports {
+                        self.exports.insert(name.to_ascii_lowercase(), *cid);
+                    }
+                }
                 _ => {}
             }
         }
+    }
+
+    /// Returns the total number of active placed display objects across the root and all nested sprite timelines.
+    #[must_use]
+    pub fn active_object_count(&self) -> usize {
+        count_timeline_objects(&self.root)
+    }
+
+    /// Attaches an exported library symbol (`ExportAssets`) as a child of `parent_path` at `depth`.
+    pub fn attach_movie(
+        &mut self,
+        parent_path: &str,
+        symbol_name: &str,
+        new_name: &str,
+        depth: u16,
+    ) -> Option<String> {
+        let cid = *self.exports.get(&symbol_name.to_ascii_lowercase())?;
+        let child_path = format!("{parent_path}.{new_name}");
+        let (dynamic_text, mut sprite_timeline) = init_instance_state(cid, &self.dictionary);
+        if let Some(ref mut st) = sprite_timeline {
+            let mut bg = self.background_color;
+            let mut dirty = false;
+            let mut ev = FrameEvents::default();
+            execute_timeline_frame_tags(
+                st,
+                0,
+                &child_path,
+                self.swf_version,
+                &self.dictionary,
+                &mut bg,
+                &mut dirty,
+                &mut ev,
+                false,
+            );
+            st.frame0_executed = true;
+        }
+        let tl = self.timeline_by_path_mut(parent_path)?;
+        tl.display_list.insert(
+            depth,
+            DisplayObject {
+                character_id: cid,
+                depth,
+                matrix: Matrix::IDENTITY,
+                color_transform: ColorTransform::IDENTITY,
+                ratio: 0,
+                name: Some(new_name.to_owned()),
+                clip_depth: None,
+                button_state: ButtonState::Up,
+                button_pressed_inside: false,
+                dynamic_text,
+                sprite_timeline,
+                clip_actions: Vec::new(),
+            },
+        );
+        self.mark_dirty();
+        Some(child_path)
+    }
+
+    /// Creates an empty child MovieClip named `new_name` at `depth` inside `parent_path`.
+    pub fn create_empty_movie_clip(
+        &mut self,
+        parent_path: &str,
+        new_name: &str,
+        depth: u16,
+    ) -> Option<String> {
+        let child_path = format!("{parent_path}.{new_name}");
+        let tl = self.timeline_by_path_mut(parent_path)?;
+        tl.display_list.insert(
+            depth,
+            DisplayObject {
+                character_id: 0,
+                depth,
+                matrix: Matrix::IDENTITY,
+                color_transform: ColorTransform::IDENTITY,
+                ratio: 0,
+                name: Some(new_name.to_owned()),
+                clip_depth: None,
+                button_state: ButtonState::Up,
+                button_pressed_inside: false,
+                dynamic_text: None,
+                sprite_timeline: Some(Timeline::new(1, Vec::new())),
+                clip_actions: Vec::new(),
+            },
+        );
+        self.mark_dirty();
+        Some(child_path)
+    }
+
+    /// Duplicates the placed display object at `source_path` into the same parent timeline at `depth` with `new_name`.
+    pub fn duplicate_movie_clip(
+        &mut self,
+        source_path: &str,
+        new_name: &str,
+        depth: u16,
+    ) -> Option<String> {
+        let mut cloned = self.display_object_by_path(source_path)?.clone();
+        cloned.depth = depth;
+        cloned.name = Some(new_name.to_owned());
+        let parent_path = parent_path_of(source_path);
+        let child_path = format!("{parent_path}.{new_name}");
+        let tl = self.timeline_by_path_mut(&parent_path)?;
+        tl.display_list.insert(depth, cloned);
+        self.mark_dirty();
+        Some(child_path)
+    }
+
+    /// Removes the placed display object at `target_path` from its parent timeline.
+    pub fn remove_movie_clip(&mut self, target_path: &str) -> bool {
+        let parts = split_clip_path(target_path);
+        let Some((&last, parent_parts)) = parts.split_last() else {
+            return false;
+        };
+        let parent_tl = if parent_parts.is_empty() {
+            Some(&mut self.root)
+        } else {
+            find_timeline_mut(&mut self.root, parent_parts)
+        };
+        let Some(tl) = parent_tl else {
+            return false;
+        };
+        let found_depth = tl
+            .display_list
+            .iter()
+            .find(|(&d, obj)| match_clip_segment(d, obj, last))
+            .map(|(&d, _)| d);
+        if let Some(d) = found_depth {
+            tl.display_list.remove(&d);
+            self.mark_dirty();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Swaps the depth of `clip_path` with `target_depth` inside its parent timeline.
+    pub fn swap_depths(&mut self, clip_path: &str, target_depth: u16) -> bool {
+        let parts = split_clip_path(clip_path);
+        let Some((&last, parent_parts)) = parts.split_last() else {
+            return false;
+        };
+        let parent_tl = if parent_parts.is_empty() {
+            Some(&mut self.root)
+        } else {
+            find_timeline_mut(&mut self.root, parent_parts)
+        };
+        let Some(tl) = parent_tl else {
+            return false;
+        };
+        let Some(src_depth) = tl
+            .display_list
+            .iter()
+            .find(|(&d, obj)| match_clip_segment(d, obj, last))
+            .map(|(&d, _)| d)
+        else {
+            return false;
+        };
+        if src_depth == target_depth {
+            return true;
+        }
+        let Some(mut src_obj) = tl.display_list.remove(&src_depth) else {
+            return false;
+        };
+        src_obj.depth = target_depth;
+        if let Some(mut dst_obj) = tl.display_list.remove(&target_depth) {
+            dst_obj.depth = src_depth;
+            tl.display_list.insert(src_depth, dst_obj);
+        }
+        tl.display_list.insert(target_depth, src_obj);
+        self.mark_dirty();
+        true
+    }
+
+    /// Computes the stage-space bounding box in twips for `clip_path`.
+    #[must_use]
+    pub fn clip_bounds_twips(&self, clip_path: &str) -> Option<Rect> {
+        let parts = split_clip_path(clip_path);
+        if parts.is_empty() {
+            return Some(Rect {
+                x_min: 0,
+                x_max: i32::try_from(self.width_px).unwrap_or(0).saturating_mul(20),
+                y_min: 0,
+                y_max: i32::try_from(self.height_px)
+                    .unwrap_or(0)
+                    .saturating_mul(20),
+            });
+        }
+        let mut cur_tl = &self.root;
+        let mut acc_matrix = Matrix::IDENTITY;
+        for (i, &seg) in parts.iter().enumerate() {
+            let found = cur_tl
+                .display_list
+                .iter()
+                .find(|(&d, obj)| match_clip_segment(d, obj, seg));
+            let (_, obj) = found?;
+            acc_matrix = concat_matrix(&acc_matrix, &obj.matrix);
+            if i.saturating_add(1) == parts.len() {
+                let local = display_object_local_bounds(obj, &self.dictionary)?;
+                return Some(transform_rect(&acc_matrix, local));
+            }
+            cur_tl = obj.sprite_timeline.as_ref()?;
+        }
+        None
+    }
+
+    /// Tests whether `(stage_x_twips, stage_y_twips)` hits `clip_path`.
+    #[must_use]
+    pub fn hit_test_point(
+        &self,
+        clip_path: &str,
+        stage_x_twips: i32,
+        stage_y_twips: i32,
+        _shape_flag: bool,
+    ) -> bool {
+        let Some(b) = self.clip_bounds_twips(clip_path) else {
+            return false;
+        };
+        stage_x_twips >= b.x_min
+            && stage_x_twips <= b.x_max
+            && stage_y_twips >= b.y_min
+            && stage_y_twips <= b.y_max
+    }
+
+    /// Tests whether the stage-space bounding boxes of `path_a` and `path_b` intersect.
+    #[must_use]
+    pub fn hit_test_clips(&self, path_a: &str, path_b: &str) -> bool {
+        let (Some(a), Some(b)) = (
+            self.clip_bounds_twips(path_a),
+            self.clip_bounds_twips(path_b),
+        ) else {
+            return false;
+        };
+        a.x_min <= b.x_max && a.x_max >= b.x_min && a.y_min <= b.y_max && a.y_max >= b.y_min
     }
 
     /// Steps the root timeline and all active nested `DefineSprite` timelines by one frame,
@@ -1430,6 +1672,10 @@ impl Stage {
             CLIP_EVENT_KEY_UP
         };
         collect_clip_input_events_recursive(&self.root, "_root", flag, Some(keycode), &mut events);
+        events.clip_callbacks.push((
+            "_root".to_owned(),
+            if down { "onKeyDown" } else { "onKeyUp" },
+        ));
         events
     }
 
@@ -1453,6 +1699,9 @@ impl Stage {
                 None,
                 &mut events,
             );
+            events
+                .clip_callbacks
+                .push(("_root".to_owned(), "onMouseMove"));
         }
         if !was_down && pressed {
             collect_clip_input_events_recursive(
@@ -1462,6 +1711,9 @@ impl Stage {
                 None,
                 &mut events,
             );
+            events
+                .clip_callbacks
+                .push(("_root".to_owned(), "onMouseDown"));
         } else if was_down && !pressed {
             collect_clip_input_events_recursive(
                 &self.root,
@@ -1470,6 +1722,9 @@ impl Stage {
                 None,
                 &mut events,
             );
+            events
+                .clip_callbacks
+                .push(("_root".to_owned(), "onMouseUp"));
         }
 
         update_buttons_in_timeline(
@@ -1715,6 +1970,93 @@ fn update_buttons_in_timeline(
                         events.actions.push((path.to_owned(), act.actions.clone()));
                     }
                 }
+                if (cond_mask & 0x0001) != 0 {
+                    events
+                        .clip_callbacks
+                        .push((child_path.clone(), "onRollOver"));
+                }
+                if (cond_mask & 0x0002) != 0 {
+                    events
+                        .clip_callbacks
+                        .push((child_path.clone(), "onRollOut"));
+                }
+                if (cond_mask & 0x0004) != 0 {
+                    events.clip_callbacks.push((child_path.clone(), "onPress"));
+                }
+                if (cond_mask & 0x0008) != 0 {
+                    events
+                        .clip_callbacks
+                        .push((child_path.clone(), "onRelease"));
+                }
+                if (cond_mask & 0x0040) != 0 {
+                    events
+                        .clip_callbacks
+                        .push((child_path.clone(), "onReleaseOutside"));
+                }
+            }
+        } else if obj.name.is_some() {
+            // Also support AS1/AS2 MovieClip button callbacks (`mc.onPress`, `mc.onRelease`, `mc.onRollOver`, `mc.onRollOut`)
+            let inside = if let Some((lx, ly)) =
+                invert_matrix_point(&obj.matrix, local_x_twips, local_y_twips)
+            {
+                if let Some(b) = display_object_local_bounds(obj, dict) {
+                    let ix = lx.round() as i32;
+                    let iy = ly.round() as i32;
+                    ix >= b.x_min && ix <= b.x_max && iy >= b.y_min && iy <= b.y_max
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+            let prev_state = obj.button_state;
+            match (prev_state, inside, was_down, pressed) {
+                (ButtonState::Up, true, false, false) => {
+                    obj.button_state = ButtonState::Over;
+                    events
+                        .clip_callbacks
+                        .push((child_path.clone(), "onRollOver"));
+                }
+                (ButtonState::Up | ButtonState::Over, true, false, true) => {
+                    obj.button_state = ButtonState::Down;
+                    obj.button_pressed_inside = true;
+                    events.clip_callbacks.push((child_path.clone(), "onPress"));
+                    for rec in &obj.clip_actions {
+                        if (rec.event_flags & CLIP_EVENT_PRESS) != 0 && !rec.actions.is_empty() {
+                            events
+                                .actions
+                                .push((child_path.clone(), rec.actions.clone()));
+                        }
+                    }
+                }
+                (ButtonState::Over, false, _, false) => {
+                    obj.button_state = ButtonState::Up;
+                    events
+                        .clip_callbacks
+                        .push((child_path.clone(), "onRollOut"));
+                }
+                (ButtonState::Down, true, true, false) => {
+                    obj.button_state = ButtonState::Over;
+                    obj.button_pressed_inside = false;
+                    events
+                        .clip_callbacks
+                        .push((child_path.clone(), "onRelease"));
+                    for rec in &obj.clip_actions {
+                        if (rec.event_flags & CLIP_EVENT_RELEASE) != 0 && !rec.actions.is_empty() {
+                            events
+                                .actions
+                                .push((child_path.clone(), rec.actions.clone()));
+                        }
+                    }
+                }
+                (ButtonState::Down, false, true, false) => {
+                    obj.button_state = ButtonState::Up;
+                    obj.button_pressed_inside = false;
+                    events
+                        .clip_callbacks
+                        .push((child_path.clone(), "onReleaseOutside"));
+                }
+                _ => {}
             }
         }
     }
@@ -2037,6 +2379,31 @@ fn seek_timeline(
     events: &mut FrameEvents,
 ) {
     let clamped = target_frame.min(tl.frame_count.saturating_sub(1));
+    if tl.frame0_executed && clamped == tl.current_frame {
+        tl.playing = play_after;
+        return;
+    }
+    if tl.frame0_executed && clamped > tl.current_frame {
+        for f in tl.current_frame.saturating_add(1)..=clamped {
+            let emit_actions = f == clamped;
+            execute_timeline_frame_tags(
+                tl,
+                f,
+                path,
+                swf_version,
+                dict,
+                bg,
+                dirty,
+                events,
+                emit_actions,
+            );
+        }
+        tl.current_frame = clamped;
+        tl.playing = play_after;
+        *dirty = true;
+        return;
+    }
+
     let saved_state: BTreeMap<u16, (u16, Option<String>, ButtonState, Option<Timeline>)> = tl
         .display_list
         .iter()
@@ -2476,4 +2843,147 @@ fn invert_matrix_point(m: &Matrix, x: f32, y: f32) -> Option<(f32, f32)> {
     let lx = (d * dx - c * dy) / det;
     let ly = (-b * dx + a * dy) / det;
     Some((lx, ly))
+}
+
+fn count_timeline_objects(tl: &Timeline) -> usize {
+    let mut total = tl.display_list.len();
+    for obj in tl.display_list.values() {
+        if let Some(ref child_tl) = obj.sprite_timeline {
+            total = total.saturating_add(count_timeline_objects(child_tl));
+        }
+    }
+    total
+}
+
+fn parent_path_of(path: &str) -> String {
+    let clean = path.trim_start_matches("_root.").trim_start_matches('/');
+    if clean.is_empty() || clean == "_root" {
+        return "_root".to_owned();
+    }
+    if let Some((parent, _)) = clean.rsplit_once('.') {
+        if parent.is_empty() || parent == "_root" {
+            "_root".to_owned()
+        } else {
+            format!("_root.{parent}")
+        }
+    } else {
+        "_root".to_owned()
+    }
+}
+
+#[allow(clippy::arithmetic_side_effects)]
+fn concat_matrix(parent: &Matrix, child: &Matrix) -> Matrix {
+    let pa = i64::from(parent.scale_x_fp16);
+    let pb = i64::from(parent.rotate_skew0_fp16);
+    let pc = i64::from(parent.rotate_skew1_fp16);
+    let pd = i64::from(parent.scale_y_fp16);
+    let ptx = i64::from(parent.translate_x_twips);
+    let pty = i64::from(parent.translate_y_twips);
+
+    let ca = i64::from(child.scale_x_fp16);
+    let cb = i64::from(child.rotate_skew0_fp16);
+    let cc = i64::from(child.rotate_skew1_fp16);
+    let cd = i64::from(child.scale_y_fp16);
+    let ctx = i64::from(child.translate_x_twips);
+    let cty = i64::from(child.translate_y_twips);
+
+    Matrix {
+        scale_x_fp16: ((pa * ca + pc * cb) >> 16) as i32,
+        rotate_skew0_fp16: ((pb * ca + pd * cb) >> 16) as i32,
+        rotate_skew1_fp16: ((pa * cc + pc * cd) >> 16) as i32,
+        scale_y_fp16: ((pb * cc + pd * cd) >> 16) as i32,
+        translate_x_twips: (((pa * ctx + pc * cty) >> 16) + ptx) as i32,
+        translate_y_twips: (((pb * ctx + pd * cty) >> 16) + pty) as i32,
+    }
+}
+
+#[allow(clippy::arithmetic_side_effects)]
+fn transform_rect(m: &Matrix, r: Rect) -> Rect {
+    let corners = [
+        (r.x_min, r.y_min),
+        (r.x_max, r.y_min),
+        (r.x_max, r.y_max),
+        (r.x_min, r.y_max),
+    ];
+    let mut x_min = i32::MAX;
+    let mut x_max = i32::MIN;
+    let mut y_min = i32::MAX;
+    let mut y_max = i32::MIN;
+    for (x, y) in corners {
+        let tx = (((i64::from(m.scale_x_fp16) * i64::from(x)
+            + i64::from(m.rotate_skew1_fp16) * i64::from(y))
+            >> 16)
+            + i64::from(m.translate_x_twips)) as i32;
+        let ty = (((i64::from(m.rotate_skew0_fp16) * i64::from(x)
+            + i64::from(m.scale_y_fp16) * i64::from(y))
+            >> 16)
+            + i64::from(m.translate_y_twips)) as i32;
+        x_min = x_min.min(tx);
+        x_max = x_max.max(tx);
+        y_min = y_min.min(ty);
+        y_max = y_max.max(ty);
+    }
+    Rect {
+        x_min,
+        x_max,
+        y_min,
+        y_max,
+    }
+}
+
+#[allow(clippy::arithmetic_side_effects)]
+fn display_object_local_bounds(
+    obj: &DisplayObject,
+    dict: &BTreeMap<u16, Character>,
+) -> Option<Rect> {
+    match dict.get(&obj.character_id) {
+        Some(Character::Shape(s)) => Some(s.bounds),
+        Some(Character::MorphShape(m)) => Some(m.start_bounds),
+        Some(Character::Bitmap(b)) => Some(Rect {
+            x_min: 0,
+            x_max: i32::try_from(b.width).unwrap_or(0).saturating_mul(20),
+            y_min: 0,
+            y_max: i32::try_from(b.height).unwrap_or(0).saturating_mul(20),
+        }),
+        Some(Character::Text(t)) => Some(t.bounds),
+        Some(Character::EditText(e)) => Some(e.bounds),
+        Some(Character::Button(b)) => {
+            let mut union: Option<Rect> = None;
+            for rec in &b.records {
+                if let Some(Character::Shape(s)) = dict.get(&rec.character_id) {
+                    let tr = transform_rect(&rec.matrix, s.bounds);
+                    union = Some(match union {
+                        None => tr,
+                        Some(u) => Rect {
+                            x_min: u.x_min.min(tr.x_min),
+                            x_max: u.x_max.max(tr.x_max),
+                            y_min: u.y_min.min(tr.y_min),
+                            y_max: u.y_max.max(tr.y_max),
+                        },
+                    });
+                }
+            }
+            union
+        }
+        Some(Character::Sprite { .. }) | None => {
+            let child_tl = obj.sprite_timeline.as_ref()?;
+            let mut union: Option<Rect> = None;
+            for cobj in child_tl.display_list.values() {
+                if let Some(cb) = display_object_local_bounds(cobj, dict) {
+                    let tr = transform_rect(&cobj.matrix, cb);
+                    union = Some(match union {
+                        None => tr,
+                        Some(u) => Rect {
+                            x_min: u.x_min.min(tr.x_min),
+                            x_max: u.x_max.max(tr.x_max),
+                            y_min: u.y_min.min(tr.y_min),
+                            y_max: u.y_max.max(tr.y_max),
+                        },
+                    });
+                }
+            }
+            union
+        }
+        _ => None,
+    }
 }

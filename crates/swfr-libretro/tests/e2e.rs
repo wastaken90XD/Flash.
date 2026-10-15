@@ -2223,3 +2223,162 @@ fn e2e_real_world_flash8_placeobject3_definefunction2_preloader_and_sprite_movem
     retro_unload_game();
     retro_deinit();
 }
+
+#[test]
+fn e2e_movieclip_button_callbacks_hittest_attach_and_debug_hud() {
+    let _guard = E2E_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    init_abi_callbacks();
+
+    let mut b = SwfBuilder::new(8, 120, 80, 60.0, 1);
+    b.push_tag(&Tag::SetBackgroundColor { r: 0, g: 0, b: 0 });
+    // DefineShape 1: 40x40 green box at (0..40, 0..40)
+    b.push_tag(&Tag::DefineShape(ShapeDef {
+        id: 1,
+        version: 1,
+        bounds: Rect {
+            x_min: 0,
+            x_max: 800,
+            y_min: 0,
+            y_max: 800,
+        },
+        fill_styles: vec![FillStyle::Solid(Rgba::rgb(0x00, 0xFF, 0x00))],
+        line_styles: Vec::new(),
+        records: vec![
+            ShapeRecord::StyleChange {
+                move_to: Some((0, 0)),
+                fill_style_0: None,
+                fill_style_1: Some(1),
+                line_style: None,
+                new_fill_styles: None,
+                new_line_styles: None,
+            },
+            ShapeRecord::StraightEdge {
+                dx_twips: 800,
+                dy_twips: 0,
+            },
+            ShapeRecord::StraightEdge {
+                dx_twips: 0,
+                dy_twips: 800,
+            },
+            ShapeRecord::StraightEdge {
+                dx_twips: -800,
+                dy_twips: 0,
+            },
+            ShapeRecord::StraightEdge {
+                dx_twips: 0,
+                dy_twips: -800,
+            },
+        ],
+    }));
+
+    // DefineSprite 2: places shape 1 at depth 1
+    b.push_tag(&Tag::DefineSprite {
+        id: 2,
+        frame_count: 1,
+        tags: vec![
+            Tag::PlaceObject2(PlaceObject2Tag {
+                is_move: false,
+                depth: 1,
+                character_id: Some(1),
+                matrix: Some(Matrix::IDENTITY),
+                color_transform: None,
+                ratio: None,
+                name: None,
+                clip_depth: None,
+                clip_actions_raw: None,
+            }),
+            Tag::ShowFrame,
+            Tag::End,
+        ],
+    });
+    b.push_tag(&Tag::ExportAssets {
+        exports: vec![(2, "box_sym".to_owned())],
+    });
+
+    // Root frame 1 script:
+    // 1. _root.attachMovie("box_sym", "btn", 5);
+    // 2. trace(_root.btn.hitTest(20, 20, false));
+    // 3. _root.btn.onPress = function() { trace("btn_pressed"); };
+    let mut cb_body = ActionBuilder::new();
+    cb_body.push_str("btn_pressed").trace();
+    let mut ab = ActionBuilder::new();
+    ab.push_i32(5)
+        .push_str("btn")
+        .push_str("box_sym")
+        .push_i32(3)
+        .push_str("_root")
+        .get_var()
+        .push_str("attachMovie")
+        .call_method()
+        .op(0x17) // Pop return value
+        // trace(_root.btn.hitTest(20, 20, false))
+        .push_bool(false)
+        .push_i32(20)
+        .push_i32(20)
+        .push_i32(3)
+        .push_str("_root")
+        .get_var()
+        .push_str("btn")
+        .get_member()
+        .push_str("hitTest")
+        .call_method()
+        .trace()
+        // _root.btn.onPress = function() { trace("btn_pressed"); }
+        .push_str("_root")
+        .get_var()
+        .push_str("btn")
+        .get_member()
+        .push_str("onPress")
+        .define_function("", &[], &cb_body.build())
+        .set_member()
+        .stop();
+
+    b.push_tag(&Tag::DoAction {
+        actions: ab.build(),
+    });
+    b.push_tag(&Tag::ShowFrame);
+    let swf = b.build();
+
+    let gi = retro_game_info {
+        path: c"btn_hud.swf".as_ptr(),
+        data: swf.as_ptr().cast::<c_void>(),
+        size: swf.len(),
+        meta: core::ptr::null(),
+    };
+    assert!(retro_load_game(core::ptr::addr_of!(gi)));
+    retro_run();
+
+    // Frame 2: click at (20, 20) on `btn` and press F9 (290) to toggle diagnostic HUD
+    if let Ok(mut fe) = FRONTEND.lock() {
+        // Map (20, 20) in 120x80 stage to [-0x7fff, 0x7fff]
+        fe.pointer_x = -21845;
+        fe.pointer_y = -16384;
+        fe.pointer_pressed = true;
+    }
+    let kb_cb = FRONTEND.lock().unwrap().keyboard_cb.unwrap();
+    invoke_keyboard_callback(kb_cb, true, 290, 0, 0);
+    retro_run();
+    invoke_keyboard_callback(kb_cb, false, 290, 0, 0);
+
+    let fe = FRONTEND.lock().unwrap();
+    let logs: Vec<String> = fe.logs.iter().map(|(_, s)| s.trim().to_owned()).collect();
+    assert!(
+        logs.iter().any(|l| l.contains("[swfr] HUD: SWF v8")),
+        "expected HUD diagnostic log, got {logs:?}"
+    );
+    assert!(
+        logs.contains(&"[trace] true".to_owned()),
+        "expected hitTest(20, 20) == true, got {logs:?}"
+    );
+    assert!(
+        logs.contains(&"[trace] btn_pressed".to_owned()),
+        "expected MovieClip onPress callback, got {logs:?}"
+    );
+    // Verify the HUD banner drew at top row y=0 (dark slate 0x00101824 instead of black 0x00000000)
+    let last_frame = fe.video_frames.last().expect("frame rendered");
+    assert_eq!(last_frame[0], 0x0010_1824);
+    drop(fe);
+
+    retro_unload_game();
+    retro_deinit();
+}

@@ -53,7 +53,6 @@ impl CompiledShape {
 
 #[derive(Debug, Clone)]
 struct LruEntry {
-    key: (u16, u16),
     last_used: u64,
     shape: FlattenedShape,
     compiled: Arc<CompiledShape>,
@@ -63,7 +62,7 @@ struct LruEntry {
 /// plus cached font glyph paths and identity-transform bitmap pixmaps.
 #[derive(Debug, Clone, Default)]
 pub struct ShapeCache {
-    entries: Vec<LruEntry>,
+    entries: BTreeMap<(u16, u16), LruEntry>,
     glyph_paths: BTreeMap<(u16, u32), Arc<Vec<Path>>>,
     bitmap_pixmaps: BTreeMap<u16, Pixmap>,
     clock: u64,
@@ -74,7 +73,7 @@ impl ShapeCache {
     #[must_use]
     pub const fn new() -> Self {
         Self {
-            entries: Vec::new(),
+            entries: BTreeMap::new(),
             glyph_paths: BTreeMap::new(),
             bitmap_pixmaps: BTreeMap::new(),
             clock: 0,
@@ -83,56 +82,54 @@ impl ShapeCache {
 
     /// Returns a cached [`FlattenedShape`] or computes and inserts it, evicting the least-recently-used
     /// entry when at [`SHAPE_LRU_CAPACITY`].
-    #[allow(clippy::indexing_slicing)]
+    #[allow(clippy::expect_used)]
     pub fn get_or_insert_with<F>(&mut self, key: (u16, u16), compute: F) -> &FlattenedShape
     where
         F: FnOnce() -> FlattenedShape,
     {
-        let idx = self.ensure_entry(key, compute);
-        &self.entries[idx].shape
+        self.ensure_entry(key, compute);
+        &self.entries.get(&key).expect("entry ensured").shape
     }
 
-    #[allow(clippy::indexing_slicing)]
+    #[allow(clippy::expect_used)]
     fn get_or_insert_compiled<F>(&mut self, key: (u16, u16), compute: F) -> Arc<CompiledShape>
     where
         F: FnOnce() -> FlattenedShape,
     {
-        let idx = self.ensure_entry(key, compute);
-        Arc::clone(&self.entries[idx].compiled)
+        self.ensure_entry(key, compute);
+        Arc::clone(&self.entries.get(&key).expect("entry ensured").compiled)
     }
 
-    #[allow(clippy::indexing_slicing)]
-    fn ensure_entry<F>(&mut self, key: (u16, u16), compute: F) -> usize
+    fn ensure_entry<F>(&mut self, key: (u16, u16), compute: F)
     where
         F: FnOnce() -> FlattenedShape,
     {
         self.clock = self.clock.wrapping_add(1);
         let now = self.clock;
-        if let Some(pos) = self.entries.iter().position(|e| e.key == key) {
-            if let Some(entry) = self.entries.get_mut(pos) {
-                entry.last_used = now;
-            }
-            return pos;
+        if let Some(entry) = self.entries.get_mut(&key) {
+            entry.last_used = now;
+            return;
         }
         let shape = compute();
         let compiled = Arc::new(CompiledShape::from_flattened(&shape));
         if self.entries.len() >= SHAPE_LRU_CAPACITY {
-            if let Some((oldest_idx, _)) = self
+            if let Some(oldest_key) = self
                 .entries
                 .iter()
-                .enumerate()
                 .min_by_key(|(_, e)| e.last_used)
+                .map(|(&k, _)| k)
             {
-                self.entries.swap_remove(oldest_idx);
+                self.entries.remove(&oldest_key);
             }
         }
-        self.entries.push(LruEntry {
+        self.entries.insert(
             key,
-            last_used: now,
-            shape,
-            compiled,
-        });
-        self.entries.len().saturating_sub(1)
+            LruEntry {
+                last_used: now,
+                shape,
+                compiled,
+            },
+        );
     }
 
     fn get_or_insert_glyph(

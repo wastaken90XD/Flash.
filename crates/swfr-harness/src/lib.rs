@@ -97,7 +97,144 @@ pub fn format_movie_info(swf_bytes: &[u8]) -> String {
         for (k, v) in counts {
             out.push_str(&format!("  tag[{k}]: {v}\n"));
         }
+        out.push_str(&run_swf_diagnostic_check(swf_bytes, 120));
     }
+    out
+}
+
+/// Runs a headless runtime health check on `swf_bytes` for `frames` ticks, reporting
+/// VM kind (`AVM1` vs `AVM2/AS3`), unknown tags, frame advancement, unique video frame
+/// hashes, active stage object counts, script logs, and a clear `VERDICT` line.
+#[must_use]
+pub fn run_swf_diagnostic_check(swf_bytes: &[u8], frames: usize) -> String {
+    let mut out = String::new();
+    let movie = match Movie::parse(swf_bytes) {
+        Ok(m) => m,
+        Err(e) => {
+            return format!("=== SWF Runtime Check ===\nVERDICT: PARSE_ERROR ({e})\n");
+        }
+    };
+    let mut player = match Player::new(swf_bytes, None, &Options::default()) {
+        Ok(p) => p,
+        Err(e) => {
+            return format!("=== SWF Runtime Check ===\nVERDICT: LOAD_ERROR ({e})\n");
+        }
+    };
+
+    let is_avm2 = movie.tags.iter().any(|t| {
+        matches!(
+            t,
+            Tag::FileAttributes {
+                actionscript3: true,
+                ..
+            }
+        ) || matches!(t, Tag::Unknown { code: 72 | 82, .. })
+    });
+    let mut unknown_codes: BTreeMap<u16, usize> = BTreeMap::new();
+    for tag in &movie.tags {
+        if let Tag::Unknown { code, .. } = tag {
+            *unknown_codes.entry(*code).or_insert(0) += 1;
+        }
+    }
+
+    let step_count = frames.max(1);
+    let mut unique_hashes = std::collections::BTreeSet::new();
+    let mut max_objs = 0_usize;
+    let mut traces = Vec::new();
+    let mut warnings = Vec::new();
+    let t0 = Instant::now();
+    let idle_input = Input::default();
+
+    for _ in 0..step_count {
+        let frame_out = player.run_frame(&idle_input);
+        if let Some(v) = frame_out.video {
+            let mut h = 0xcbf2_9ce4_8422_2325_u64;
+            for &px in v.xrgb.iter().step_by(7) {
+                h ^= u64::from(px);
+                h = h.wrapping_mul(0x0100_0000_01b3);
+            }
+            unique_hashes.insert(h);
+        }
+        for line in frame_out.logs {
+            match line.level {
+                swfr_player::LogLevel::Warn | swfr_player::LogLevel::Error => {
+                    if warnings.len() < 10 {
+                        warnings.push(line.message.clone());
+                    }
+                }
+                _ => {
+                    if traces.len() < 10 {
+                        traces.push(line.message.clone());
+                    }
+                }
+            }
+        }
+        if let Some(d) = player.diagnostics() {
+            max_objs = max_objs.max(d.active_objects);
+        }
+    }
+    let elapsed_ms = t0.elapsed().as_secs_f64() * 1000.0;
+    let ms_per_frame = elapsed_ms / (step_count as f64);
+    let diag = player.diagnostics();
+
+    out.push_str("=== SWF Runtime Check ===\n");
+    out.push_str(&format!(
+        "  vm_kind: {}\n",
+        if is_avm2 {
+            "AVM2 (ActionScript 3 / DoABC - UNSUPPORTED by swfr AVM1 engine)"
+        } else {
+            "AVM1 (ActionScript 1/2 - SUPPORTED)"
+        }
+    ));
+    if !unknown_codes.is_empty() {
+        let list: Vec<String> = unknown_codes
+            .iter()
+            .map(|(code, cnt)| format!("tag#{code}x{cnt}"))
+            .collect();
+        out.push_str(&format!("  unhandled_tags: {}\n", list.join(", ")));
+    }
+    if let Some(ref d) = diag {
+        out.push_str(&format!(
+            "  timeline_after_{step_count}_ticks: frame {}/{} ({}), max_active_objects={}, dict_defs={}\n",
+            d.current_frame,
+            d.total_frames,
+            if d.playing { "PLAYING" } else { "STOPPED" },
+            max_objs,
+            d.dictionary_count
+        ));
+    }
+    out.push_str(&format!(
+        "  render_activity: {} unique video frame(s) across {} ticks ({:.3} ms/frame, {:.1} fps)\n",
+        unique_hashes.len(),
+        step_count,
+        ms_per_frame,
+        if ms_per_frame > 0.0 {
+            1000.0 / ms_per_frame
+        } else {
+            0.0
+        }
+    ));
+    if !traces.is_empty() {
+        out.push_str(&format!("  traces_sample: {}\n", traces.join(" | ")));
+    }
+    if !warnings.is_empty() {
+        out.push_str(&format!("  warnings_sample: {}\n", warnings.join(" | ")));
+    }
+
+    let verdict = if is_avm2 {
+        "UNSUPPORTED_AVM2: This SWF uses ActionScript 3 (AVM2/DoABC). swfr is an AVM1 (Flash 1-8 AS1/AS2) player, so AS3 game logic will not run."
+    } else if !warnings.is_empty() {
+        "WARN_WATCHDOG_OR_LIMIT: SWF hit script watchdog or warning during execution."
+    } else if max_objs == 0 && unique_hashes.len() <= 1 && traces.is_empty() {
+        "BLANK_STAGE: SWF parsed, but no display objects or frame changes were produced."
+    } else if diag.as_ref().is_some_and(|d| !d.playing) && unique_hashes.len() <= 2 {
+        "WORKING_WAITING_FOR_INPUT: SWF rendered stage objects and stopped on a menu/preloader frame waiting for mouse click or key input."
+    } else if unique_hashes.len() > 1 || !traces.is_empty() {
+        "WORKING_ANIMATING: SWF is actively advancing frames, rendering visuals, and/or executing AVM1 scripts."
+    } else {
+        "WORKING_STATIC: SWF rendered its stage cleanly (static content or single-frame movie)."
+    };
+    out.push_str(&format!("VERDICT: {verdict}\n"));
     out
 }
 

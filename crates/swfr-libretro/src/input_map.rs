@@ -39,6 +39,8 @@ pub struct RawInputSnapshot {
     pub joypad_east: bool,
     /// Joypad Start button pressed.
     pub joypad_start: bool,
+    /// Joypad Select button pressed (toggles on-screen diagnostic HUD).
+    pub joypad_select: bool,
     /// Analog left stick X in `[-0x7fff, 0x7fff]`.
     pub analog_left_x: i16,
     /// Analog left stick Y in `[-0x7fff, 0x7fff]`.
@@ -99,6 +101,14 @@ impl InputTracker {
     /// Queues a keyboard event received from `retro_keyboard_event_t`.
     pub fn push_key_event(&mut self, event: KeyEvent) {
         self.queued_keys.push(event);
+    }
+
+    /// Returns `true` if a key-down event with `keycode` was queued this frame.
+    #[must_use]
+    pub fn has_queued_key_down(&self, keycode: u32) -> bool {
+        self.queued_keys
+            .iter()
+            .any(|k| k.down && k.keycode == keycode)
     }
 
     /// Converts a [`RawInputSnapshot`] into a [`swfr_player::Input`] for a stage of `(width, height)`.

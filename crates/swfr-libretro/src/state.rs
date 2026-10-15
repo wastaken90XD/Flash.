@@ -61,6 +61,10 @@ pub struct CoreState {
     pub save_ram: Vec<u8>,
     /// Whether the next `retro_run` should inject a test panic (`fault-inject` testing).
     pub inject_fault_next_run: bool,
+    /// Whether the live on-screen diagnostic HUD (`Select` or `F9`) is enabled.
+    pub debug_hud_enabled: bool,
+    /// Previous frame's HUD toggle button state (for rising-edge detection).
+    pub prev_hud_toggle_down: bool,
 }
 
 impl Default for CoreState {
@@ -99,6 +103,8 @@ impl CoreState {
             dead_logs: Vec::new(),
             save_ram: Vec::new(),
             inject_fault_next_run: false,
+            debug_hud_enabled: false,
+            prev_hud_toggle_down: false,
         }
     }
 
@@ -129,6 +135,8 @@ impl CoreState {
         self.dead_logs.clear();
         self.save_ram.clear();
         self.inject_fault_next_run = false;
+        self.debug_hud_enabled = false;
+        self.prev_hud_toggle_down = false;
     }
 
     /// Loads SWF bytes into a new [`Player`] instance (`retro_load_game`).
@@ -157,6 +165,8 @@ impl CoreState {
         let av = player.av_info();
         self.fallback_width = av.width;
         self.fallback_height = av.height;
+        self.debug_hud_enabled = std::env::var("SWFR_DEBUG_HUD")
+            .is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"));
         self.player = Some(player);
         Ok(av)
     }
@@ -164,6 +174,8 @@ impl CoreState {
     /// Unloads the current game while keeping global core state (`retro_unload_game`).
     pub fn unload_game(&mut self) {
         self.player = None;
+        self.debug_hud_enabled = false;
+        self.prev_hud_toggle_down = false;
     }
 
     /// Resets the loaded player back to frame 1 (`retro_reset`).
@@ -232,6 +244,17 @@ impl CoreState {
             };
         }
 
+        // Toggle on-screen diagnostic HUD on rising edge of RetroPad Select or keyboard F9 (290).
+        let f9_down = self.input_tracker.has_queued_key_down(290);
+        let select_down = raw_input.joypad_select;
+        let toggle_down = select_down || f9_down;
+        let mut hud_just_enabled = false;
+        if toggle_down && !self.prev_hud_toggle_down {
+            self.debug_hud_enabled = !self.debug_hud_enabled;
+            hud_just_enabled = self.debug_hud_enabled;
+        }
+        self.prev_hud_toggle_down = toggle_down;
+
         let av = self.av_info();
         let input = self.input_tracker.build_frame_input(
             raw_input,
@@ -243,6 +266,9 @@ impl CoreState {
 
         if let Some(player) = self.player.as_mut() {
             let _ = player.run_frame(&input);
+            if hud_just_enabled {
+                player.emit_diagnostics_log();
+            }
             if self.input_tracker.cursor_visible() {
                 if let Some((cx, cy)) = input.pointer {
                     player.draw_software_cursor(
@@ -251,6 +277,9 @@ impl CoreState {
                         (input.buttons & 1) != 0,
                     );
                 }
+            }
+            if self.debug_hud_enabled {
+                player.draw_debug_hud();
             }
             let out = player.last_frame_out();
             let (video_pixels, width, height) = match out.video {

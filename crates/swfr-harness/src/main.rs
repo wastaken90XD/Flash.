@@ -4,7 +4,8 @@ use std::env;
 use std::fs;
 use std::path::Path;
 use swfr_harness::{
-    build_benchmark_swf, format_movie_info, run_benchmark_suite, write_synthetic_test_swfs,
+    build_benchmark_swf, format_movie_info, run_benchmark_suite, run_swf_diagnostic_check,
+    write_synthetic_test_swfs,
 };
 
 fn main() {
@@ -18,6 +19,28 @@ fn main() {
             if let Err(err) = write_synthetic_test_swfs(Path::new(&dir)) {
                 eprintln!("error writing test swfs: {err}");
                 std::process::exit(1);
+            }
+        }
+        Some("check") => {
+            let Some(path) = args.next() else {
+                eprintln!("usage: swfr-harness check <file.swf> [frames]");
+                std::process::exit(1);
+            };
+            let frames = args
+                .next()
+                .and_then(|s| s.parse::<usize>().ok())
+                .unwrap_or(120);
+            match fs::read(&path) {
+                Ok(bytes) => print!("{}", format_movie_info(&bytes)),
+                Err(err) => {
+                    eprintln!("error reading '{path}': {err}");
+                    std::process::exit(1);
+                }
+            }
+            if frames != 120 {
+                if let Ok(bytes) = fs::read(&path) {
+                    print!("{}", run_swf_diagnostic_check(&bytes, frames));
+                }
             }
         }
         Some("info") => {

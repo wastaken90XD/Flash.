@@ -1054,6 +1054,8 @@ pub extern "C" fn retro_run() {
                 state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A) != 0;
             raw_input.joypad_start =
                 state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START) != 0;
+            raw_input.joypad_select =
+                state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT) != 0;
 
             raw_input.analog_left_x = state_cb(
                 0,
