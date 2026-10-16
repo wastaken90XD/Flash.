@@ -2225,6 +2225,37 @@ fn e2e_real_world_flash8_placeobject3_definefunction2_preloader_and_sprite_movem
 }
 
 #[test]
+fn e2e_flash_projector_exe_extracts_and_runs_embedded_swf() {
+    let _guard = E2E_LOCK.lock().unwrap();
+    init_abi_callbacks();
+
+    let mut builder = SwfBuilder::new(8, 64, 48, 12.0, 1);
+    builder.push_tag(&Tag::SetBackgroundColor { r: 0x22, g: 0x44, b: 0x66 });
+    builder.push_tag(&Tag::ShowFrame);
+    let swf = builder.build();
+    let mut exe = b"MZ-Flash-Projector-stub".to_vec();
+    exe.extend_from_slice(&swf);
+    exe.extend_from_slice(&0xFA12_3456_u32.to_le_bytes());
+    exe.extend_from_slice(&(swf.len() as u32).to_le_bytes());
+
+    let gi = retro_game_info {
+        path: c"flash_projector.exe".as_ptr(),
+        data: exe.as_ptr().cast::<c_void>(),
+        size: exe.len(),
+        meta: core::ptr::null(),
+    };
+    assert!(retro_load_game(core::ptr::addr_of!(gi)));
+    retro_run();
+    let frontend = FRONTEND.lock().unwrap();
+    assert_eq!(frontend.last_width, 64);
+    assert_eq!(frontend.last_height, 48);
+    assert_eq!(frontend.video_frames.last().and_then(|f| f.first()), Some(&0x0022_4466));
+    drop(frontend);
+    retro_unload_game();
+    retro_deinit();
+}
+
+#[test]
 fn e2e_movieclip_button_callbacks_hittest_attach_and_debug_hud() {
     let _guard = E2E_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     init_abi_callbacks();

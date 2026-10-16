@@ -169,28 +169,33 @@ impl InputTracker {
             pad_click = raw.joypad_south;
         }
 
-        // Emit Flash virtual key events on joypad button transitions.
-        // In Cursor mode, D-Pad and B control the cursor/click, while A (Space) and Start (Enter)
-        // emit key events; in Keys mode, all 7 buttons emit Flash virtual key events.
-        if pad_mode == PadMode::Keys {
-            let dpad_transitions = [
-                (raw.joypad_left, &mut self.prev_left, 37_u32),
-                (raw.joypad_up, &mut self.prev_up, 38_u32),
-                (raw.joypad_right, &mut self.prev_right, 39_u32),
-                (raw.joypad_down, &mut self.prev_down, 40_u32),
-                (raw.joypad_south, &mut self.prev_south, 32_u32),
-            ];
-            for (now, prev, keycode) in dpad_transitions {
-                if now != *prev {
-                    *prev = now;
-                    self.queued_keys.push(KeyEvent {
-                        keycode,
-                        character: 0,
-                        modifiers: 0,
-                        down: now,
-                    });
-                }
+        // Emit Flash/Win32 virtual key events on joypad D-Pad transitions in both Cursor and Keys modes,
+        // and emit Space (32) for South (B) when in Keys mode.
+        let dpad_transitions = [
+            (raw.joypad_left, &mut self.prev_left, 37_u32),
+            (raw.joypad_up, &mut self.prev_up, 38_u32),
+            (raw.joypad_right, &mut self.prev_right, 39_u32),
+            (raw.joypad_down, &mut self.prev_down, 40_u32),
+        ];
+        for (now, prev, keycode) in dpad_transitions {
+            if now != *prev {
+                *prev = now;
+                self.queued_keys.push(KeyEvent {
+                    keycode,
+                    character: 0,
+                    modifiers: 0,
+                    down: now,
+                });
             }
+        }
+        if pad_mode == PadMode::Keys && raw.joypad_south != self.prev_south {
+            self.prev_south = raw.joypad_south;
+            self.queued_keys.push(KeyEvent {
+                keycode: 32_u32,
+                character: 0,
+                modifiers: 0,
+                down: raw.joypad_south,
+            });
         }
         let action_transitions = [
             (raw.joypad_east, &mut self.prev_east, 32_u32),

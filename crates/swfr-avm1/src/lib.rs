@@ -1148,6 +1148,8 @@ pub struct Avm1 {
     pub load_movie_requests: Vec<(String, String)>,
     /// Target-frame actions queued by `gotoAndStop` / `gotoAndPlay` during an action block (TSD 4.6 item 7).
     pending_goto_actions: Vec<(String, Vec<u8>)>,
+    /// Registered AS2 classes by lowercase symbol name (`Object.registerClass`).
+    registered_classes: BTreeMap<String, ObjId>,
     /// Most recent uncaught exception thrown by `ActionThrow` (`0x2A`).
     last_exception: Option<Value>,
 }
@@ -1213,6 +1215,7 @@ impl Avm1 {
             save_ram,
             load_movie_requests: Vec::new(),
             pending_goto_actions: Vec::new(),
+            registered_classes: BTreeMap::new(),
             last_exception: None,
         };
         vm.init_builtins();
@@ -1302,6 +1305,12 @@ impl Avm1 {
             Value::String("showAll".to_owned()),
             self.swf_version,
         );
+        self.heap.set_prop(
+            stage_id,
+            "__builtin__",
+            Value::String("Stage".to_owned()),
+            self.swf_version,
+        );
         self.set_global("Stage", Value::Object(stage_id));
 
         // Mouse built-in object
@@ -1323,6 +1332,36 @@ impl Avm1 {
             self.swf_version,
         );
         self.set_global("SharedObject", Value::Object(so_id));
+
+        // Core AS1/AS2 global constructor objects (Object, MovieClip, Function, Array, Sound, Color, System)
+        for cname in [
+            "Object",
+            "MovieClip",
+            "Function",
+            "Array",
+            "String",
+            "Number",
+            "Boolean",
+            "Sound",
+            "Color",
+            "System",
+        ] {
+            let ctor_id = self.heap.alloc_object(None);
+            let proto_id = self.heap.alloc_object(None);
+            self.heap.set_prop(
+                ctor_id,
+                "prototype",
+                Value::Object(proto_id),
+                self.swf_version,
+            );
+            self.heap.set_prop(
+                ctor_id,
+                "__builtin__",
+                Value::String(cname.to_owned()),
+                self.swf_version,
+            );
+            self.set_global(cname, Value::Object(ctor_id));
+        }
     }
 
     /// Serializes all `SharedObject` instances into the 64 KiB `"SWFS"` + CRC32 `save_ram` buffer.
@@ -1503,11 +1542,13 @@ impl Avm1 {
             }
         }
         for (cpath, fid) in enter_cbs {
+            let prev_base = core::mem::replace(&mut self.base_clip_path, cpath.clone());
             let prev_clip = core::mem::replace(&mut self.current_clip_path, cpath);
             let mut budget = self.max_ops_per_run;
             let _ = self.invoke_user_function(fid, None, Vec::new(), stage, &mut budget);
             self.drain_pending_goto_actions(stage, &mut budget);
             self.current_clip_path = prev_clip;
+            self.base_clip_path = prev_base;
         }
     }
 
@@ -1539,12 +1580,15 @@ impl Avm1 {
             });
         if let Some(fid) = fid_opt {
             if self.heap.is_function(fid) {
+                let prev_base =
+                    core::mem::replace(&mut self.base_clip_path, clip_path.to_owned());
                 let prev_clip =
                     core::mem::replace(&mut self.current_clip_path, clip_path.to_owned());
                 let mut budget = self.max_ops_per_run;
                 let _ = self.invoke_user_function(fid, None, Vec::new(), stage, &mut budget);
                 self.drain_pending_goto_actions(stage, &mut budget);
                 self.current_clip_path = prev_clip;
+                self.base_clip_path = prev_base;
             }
         }
     }
@@ -1628,6 +1672,7 @@ impl Avm1 {
             }
             roots.extend(self.registers.iter().cloned());
             roots.extend(self.shared_objects.values().copied().map(Value::Object));
+            roots.extend(self.registered_classes.values().copied().map(Value::Object));
             let _ = self.heap.collect_garbage(&roots);
         }
     }
@@ -1638,11 +1683,13 @@ impl Avm1 {
             hops = hops.saturating_add(1);
             let batch: Vec<(String, Vec<u8>)> = core::mem::take(&mut self.pending_goto_actions);
             for (target_path, code) in batch {
+                let prev_base = core::mem::replace(&mut self.base_clip_path, target_path.clone());
                 let prev_clip = core::mem::replace(&mut self.current_clip_path, target_path);
                 let target_ops = self.cached_decode_ops(&code);
                 let mut target_locals = BTreeMap::new();
                 let _ = self.run_ops_inner(&target_ops, None, &mut target_locals, stage, budget, 0);
                 self.current_clip_path = prev_clip;
+                self.base_clip_path = prev_base;
                 if self.watchdog_tripped {
                     break;
                 }
@@ -1756,14 +1803,19 @@ impl Avm1 {
                             self.queue_goto_frame(stage, &cur_path, f, *play_after);
                         }
                         Value::String(s) => {
+                            let (clip_p, frame_part) = if let Some((prefix, rest)) = s.rsplit_once(':') {
+                                (self.resolve_target_path(prefix, stage), rest)
+                            } else {
+                                (cur_path, s.as_str())
+                            };
                             let resolved = stage
-                                .timeline_by_path(&cur_path)
-                                .and_then(|tl| tl.resolve_label(&s));
+                                .timeline_by_path(&clip_p)
+                                .and_then(|tl| tl.resolve_label(frame_part));
                             if let Some(f) = resolved {
-                                self.queue_goto_frame(stage, &cur_path, f, *play_after);
-                            } else if let Ok(n) = s.parse::<u16>() {
+                                self.queue_goto_frame(stage, &clip_p, f, *play_after);
+                            } else if let Ok(n) = frame_part.parse::<u16>() {
                                 if n >= 1 {
-                                    self.queue_goto_frame(stage, &cur_path, n - 1, *play_after);
+                                    self.queue_goto_frame(stage, &clip_p, n - 1, *play_after);
                                 }
                             }
                         }
@@ -1778,7 +1830,12 @@ impl Avm1 {
                     }
                 }
                 Op::SetTarget2 => {
-                    let t = self.pop().to_avm_string(self.swf_version, &self.heap);
+                    let raw = self.pop();
+                    let t = if matches!(raw, Value::Undefined | Value::Null) {
+                        String::new()
+                    } else {
+                        raw.to_avm_string(self.swf_version, &self.heap)
+                    };
                     if t.is_empty() {
                         self.current_clip_path.clone_from(&self.base_clip_path);
                     } else {
@@ -1873,14 +1930,19 @@ impl Avm1 {
                     self.stack.push(Value::String(s));
                 }
                 Op::NewMethod => {
-                    let mname = self.pop().to_avm_string(self.swf_version, &self.heap);
+                    let raw_mname = self.pop();
+                    let mname = if matches!(raw_mname, Value::Undefined | Value::Null) {
+                        String::new()
+                    } else {
+                        raw_mname.to_avm_string(self.swf_version, &self.heap)
+                    };
                     let obj = self.pop();
                     let nargs = self.pop().to_i32(self.swf_version).max(0) as usize;
                     let mut args = Vec::with_capacity(nargs.min(256));
                     for _ in 0..nargs.min(256) {
                         args.push(self.pop());
                     }
-                    let ctor_val = if mname.is_empty() {
+                    let ctor_val = if mname.is_empty() || mname == "undefined" {
                         obj
                     } else {
                         self.get_member_value(&obj, &mname, stage)
@@ -2295,7 +2357,12 @@ impl Avm1 {
                 }
                 Op::GetProperty => {
                     let idx = self.pop().to_i32(self.swf_version);
-                    let target_str = self.pop().to_avm_string(self.swf_version, &self.heap);
+                    let raw_target = self.pop();
+                    let target_str = if matches!(raw_target, Value::Undefined | Value::Null) {
+                        String::new()
+                    } else {
+                        raw_target.to_avm_string(self.swf_version, &self.heap)
+                    };
                     let tpath = if target_str.is_empty() {
                         self.current_clip_path.clone()
                     } else {
@@ -2312,7 +2379,12 @@ impl Avm1 {
                 Op::SetProperty => {
                     let val = self.pop();
                     let idx = self.pop().to_i32(self.swf_version);
-                    let target_str = self.pop().to_avm_string(self.swf_version, &self.heap);
+                    let raw_target = self.pop();
+                    let target_str = if matches!(raw_target, Value::Undefined | Value::Null) {
+                        String::new()
+                    } else {
+                        raw_target.to_avm_string(self.swf_version, &self.heap)
+                    };
                     let tpath = if target_str.is_empty() {
                         self.current_clip_path.clone()
                     } else {
@@ -2373,7 +2445,12 @@ impl Avm1 {
                     self.stack.push(res);
                 }
                 Op::CallMethod => {
-                    let mname = self.pop().to_avm_string(self.swf_version, &self.heap);
+                    let raw_mname = self.pop();
+                    let mname = if matches!(raw_mname, Value::Undefined | Value::Null) {
+                        String::new()
+                    } else {
+                        raw_mname.to_avm_string(self.swf_version, &self.heap)
+                    };
                     let receiver = self.pop();
                     let nargs = self.pop().to_i32(self.swf_version).max(0) as usize;
                     let mut args = Vec::with_capacity(nargs.min(256));
@@ -2615,7 +2692,22 @@ impl Avm1 {
                     }
                 }
             }
-            Value::Object(id) => self.heap.get_prop(*id, prop, self.swf_version),
+            Value::Object(id) => {
+                if let Value::String(btag) =
+                    self.heap.get_prop(*id, "__builtin__", self.swf_version)
+                {
+                    if btag == "Stage" {
+                        let norm = prop.to_ascii_lowercase();
+                        if norm == "width" {
+                            return Value::Number(f64::from(stage.width_px));
+                        }
+                        if norm == "height" {
+                            return Value::Number(f64::from(stage.height_px));
+                        }
+                    }
+                }
+                self.heap.get_prop(*id, prop, self.swf_version)
+            }
             _ => Value::Undefined,
         }
     }
@@ -2839,8 +2931,20 @@ impl Avm1 {
                 let cur_path = self.current_clip_path.clone();
                 self.call_method_on(&Value::MovieClip(cur_path), &lower, args, stage, budget, 0)
             }
-            "play" | "stop" | "nextframe" | "prevframe" | "removemovieclip"
-            | "duplicatemovieclip" => {
+            "play"
+            | "stop"
+            | "nextframe"
+            | "prevframe"
+            | "removemovieclip"
+            | "duplicatemovieclip"
+            | "attachmovie"
+            | "createemptymovieclip"
+            | "getnexthighestdepth"
+            | "getdepth"
+            | "swapdepths"
+            | "hittest"
+            | "startdrag"
+            | "stopdrag" => {
                 let cur_path = self.current_clip_path.clone();
                 self.call_method_on(&Value::MovieClip(cur_path), &lower, args, stage, budget, 0)
             }
@@ -2848,6 +2952,16 @@ impl Avm1 {
                 let fval = locals
                     .get(&norm)
                     .cloned()
+                    .or_else(|| {
+                        this_obj.and_then(|oid| {
+                            let v = self.heap.get_prop(oid, fname, self.swf_version);
+                            if matches!(v, Value::Undefined) {
+                                None
+                            } else {
+                                Some(v)
+                            }
+                        })
+                    })
                     .or_else(|| {
                         self.clip_props
                             .get(&self.current_clip_path)
@@ -3019,10 +3133,18 @@ impl Avm1 {
                     Value::Undefined
                 }
                 "getbytesloaded" | "getbytestotal" => Value::Number(100_000.0),
+                "getnexthighestdepth" => {
+                    let next_d = stage
+                        .timeline_by_path(path)
+                        .and_then(|tl| tl.display_list.keys().next_back().map(|d| d.saturating_add(1)))
+                        .unwrap_or(0);
+                    Value::Number(f64::from(next_d))
+                }
                 "getdepth" => {
                     let d = stage.display_object_by_path(path).map_or(0, |o| o.depth);
                     Value::Number(f64::from(d))
                 }
+                "startdrag" | "stopdrag" => Value::Undefined,
                 "swapdepths" => {
                     if let Some(arg) = args.first() {
                         let target_d = match arg {
@@ -3045,9 +3167,42 @@ impl Avm1 {
                     let d = args
                         .get(2)
                         .map_or(1, |v| v.to_i32(self.swf_version).clamp(0, 65535) as u16);
-                    stage
-                        .attach_movie(path, &sym, &new_name, d)
-                        .map_or(Value::Undefined, Value::MovieClip)
+                    if let Some((child_path, ev)) =
+                        stage.attach_movie_with_events(path, &sym, &new_name, d)
+                    {
+                        if let Some(&ctor_id) =
+                            self.registered_classes.get(&sym.to_ascii_lowercase())
+                        {
+                            if let Value::Object(proto_id) =
+                                self.heap.get_prop(ctor_id, "prototype", self.swf_version)
+                            {
+                                for k in self.heap.own_keys(proto_id) {
+                                    let pv = self.heap.get_prop(proto_id, &k, self.swf_version);
+                                    let nk = normalize_key(&k, self.swf_version);
+                                    self.clip_props
+                                        .entry(child_path.clone())
+                                        .or_default()
+                                        .insert(nk, pv);
+                                }
+                            }
+                            let prev_base =
+                                core::mem::replace(&mut self.base_clip_path, child_path.clone());
+                            let prev_clip =
+                                core::mem::replace(&mut self.current_clip_path, child_path.clone());
+                            let _ =
+                                self.invoke_user_function(ctor_id, None, Vec::new(), stage, budget);
+                            self.current_clip_path = prev_clip;
+                            self.base_clip_path = prev_base;
+                        }
+                        for (act_path, act) in ev.actions {
+                            if !act.is_empty() {
+                                self.pending_goto_actions.push((act_path, act));
+                            }
+                        }
+                        Value::MovieClip(child_path)
+                    } else {
+                        Value::Undefined
+                    }
                 }
                 "createemptymovieclip" => {
                     let new_name = args.first().map_or_else(String::new, |v| {
@@ -3137,6 +3292,18 @@ impl Avm1 {
         };
 
         if let Value::String(btag) = self.heap.get_prop(obj_id, "__builtin__", self.swf_version) {
+            if btag == "Object" && norm == "registerclass" {
+                let sym = args
+                    .first()
+                    .map_or_else(String::new, |v| v.to_avm_string(self.swf_version, &self.heap))
+                    .to_ascii_lowercase();
+                if let Some(&Value::Object(ctor_id)) = args.get(1) {
+                    self.registered_classes.insert(sym, ctor_id);
+                    return Value::Bool(true);
+                }
+                self.registered_classes.remove(&sym);
+                return Value::Bool(false);
+            }
             if btag == "SharedObject" && norm == "getlocal" {
                 let name = args.first().map_or_else(
                     || "default".to_owned(),
@@ -3284,6 +3451,64 @@ impl Avm1 {
                     return Value::Object(self.heap.alloc_array(slice));
                 }
                 _ => {}
+            }
+        }
+
+        // Direct function object invocation (`CallMethod` with empty/undefined method name or `Function.prototype.call`/`apply`)
+        if self.heap.is_function(obj_id) && depth < 256 {
+            if mname.is_empty() || norm == "undefined" {
+                return self
+                    .invoke_user_function(obj_id, None, args, stage, budget)
+                    .unwrap_or(Value::Undefined);
+            }
+            if norm == "call" {
+                let this_arg = args.first().cloned().unwrap_or(Value::Undefined);
+                let call_args = args.get(1..).unwrap_or(&[]).to_vec();
+                return match this_arg {
+                    Value::Object(tid) => self
+                        .invoke_user_function(obj_id, Some(tid), call_args, stage, budget)
+                        .unwrap_or(Value::Undefined),
+                    Value::MovieClip(cpath) => {
+                        let prev_base = core::mem::replace(&mut self.base_clip_path, cpath.clone());
+                        let prev_clip = core::mem::replace(&mut self.current_clip_path, cpath);
+                        let res = self
+                            .invoke_user_function(obj_id, None, call_args, stage, budget)
+                            .unwrap_or(Value::Undefined);
+                        self.current_clip_path = prev_clip;
+                        self.base_clip_path = prev_base;
+                        res
+                    }
+                    _ => self
+                        .invoke_user_function(obj_id, None, call_args, stage, budget)
+                        .unwrap_or(Value::Undefined),
+                };
+            }
+            if norm == "apply" {
+                let this_arg = args.first().cloned().unwrap_or(Value::Undefined);
+                let call_args = match args.get(1) {
+                    Some(Value::Object(arr_id)) => {
+                        self.heap.array_elements(*arr_id).unwrap_or(&[]).to_vec()
+                    }
+                    _ => Vec::new(),
+                };
+                return match this_arg {
+                    Value::Object(tid) => self
+                        .invoke_user_function(obj_id, Some(tid), call_args, stage, budget)
+                        .unwrap_or(Value::Undefined),
+                    Value::MovieClip(cpath) => {
+                        let prev_base = core::mem::replace(&mut self.base_clip_path, cpath.clone());
+                        let prev_clip = core::mem::replace(&mut self.current_clip_path, cpath);
+                        let res = self
+                            .invoke_user_function(obj_id, None, call_args, stage, budget)
+                            .unwrap_or(Value::Undefined);
+                        self.current_clip_path = prev_clip;
+                        self.base_clip_path = prev_base;
+                        res
+                    }
+                    _ => self
+                        .invoke_user_function(obj_id, None, call_args, stage, budget)
+                        .unwrap_or(Value::Undefined),
+                };
             }
         }
 

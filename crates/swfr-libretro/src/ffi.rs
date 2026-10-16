@@ -370,7 +370,7 @@ pub struct retro_game_info {
 
 const LIBRARY_NAME: &CStr = c"swfr";
 const LIBRARY_VERSION: &CStr = c"0.1.0";
-const VALID_EXTENSIONS: &CStr = c"swf";
+const VALID_EXTENSIONS: &CStr = c"swf|exe";
 
 static LEGACY_VARIABLES: [retro_variable; 7] = [
     retro_variable {

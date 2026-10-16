@@ -15,6 +15,7 @@
 
 # List of extensions the core supports:
 # supported_extensions = "nes|fds"
+# supported_extensions = "swf|exe"  # `exe` can identify an embedded Flash projector movie
 
 # License of the cores source code:
 # license = "GPLv3"

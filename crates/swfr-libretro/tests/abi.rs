@@ -123,6 +123,10 @@ fn full_libretro_abi_lifecycle_and_fault_containment() {
     assert!(!sys_info.library_name.is_null());
     assert!(!sys_info.library_version.is_null());
     assert!(!sys_info.valid_extensions.is_null());
+    assert_eq!(
+        swfr_libretro::ffi::copy_c_str_from_callback_ptr(sys_info.valid_extensions),
+        "swf|exe"
+    );
     assert!(!sys_info.need_fullpath);
     assert!(!sys_info.block_extract);
 

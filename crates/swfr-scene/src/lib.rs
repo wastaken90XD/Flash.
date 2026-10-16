@@ -1307,13 +1307,26 @@ impl Stage {
         new_name: &str,
         depth: u16,
     ) -> Option<String> {
+        self.attach_movie_with_events(parent_path, symbol_name, new_name, depth)
+            .map(|(path, _)| path)
+    }
+
+    /// Attaches an exported library symbol (`ExportAssets`) as a child of `parent_path` at `depth`,
+    /// returning both the new child path and any Frame 0 [`FrameEvents`] triggered on the attached sprite.
+    pub fn attach_movie_with_events(
+        &mut self,
+        parent_path: &str,
+        symbol_name: &str,
+        new_name: &str,
+        depth: u16,
+    ) -> Option<(String, FrameEvents)> {
         let cid = *self.exports.get(&symbol_name.to_ascii_lowercase())?;
         let child_path = format!("{parent_path}.{new_name}");
         let (dynamic_text, mut sprite_timeline) = init_instance_state(cid, &self.dictionary);
+        let mut ev = FrameEvents::default();
         if let Some(ref mut st) = sprite_timeline {
             let mut bg = self.background_color;
             let mut dirty = false;
-            let mut ev = FrameEvents::default();
             execute_timeline_frame_tags(
                 st,
                 0,
@@ -1323,7 +1336,7 @@ impl Stage {
                 &mut bg,
                 &mut dirty,
                 &mut ev,
-                false,
+                true,
             );
             st.frame0_executed = true;
         }
@@ -1346,7 +1359,7 @@ impl Stage {
             },
         );
         self.mark_dirty();
-        Some(child_path)
+        Some((child_path, ev))
     }
 
     /// Creates an empty child MovieClip named `new_name` at `depth` inside `parent_path`.
@@ -2344,6 +2357,7 @@ fn step_timeline_one_frame(
             events.start_sounds.extend(child_ev.start_sounds);
             events.stream_heads.extend(child_ev.stream_heads);
             events.stream_blocks.extend(child_ev.stream_blocks);
+            events.clip_callbacks.extend(child_ev.clip_callbacks);
             enter_frame_actions.extend(child_ev.actions);
         }
         for rec in &obj.clip_actions {
@@ -2356,6 +2370,7 @@ fn step_timeline_one_frame(
     events.start_sounds.extend(frame_events.start_sounds);
     events.stream_heads.extend(frame_events.stream_heads);
     events.stream_blocks.extend(frame_events.stream_blocks);
+    events.clip_callbacks.extend(frame_events.clip_callbacks);
     // If no unload actions were queued on this frame, enterFrame runs before parent frame DoAction;
     // otherwise frame_events.actions already ordered unload -> parent -> load.
     if enter_frame_actions.is_empty() {

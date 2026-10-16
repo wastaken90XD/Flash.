@@ -12,6 +12,9 @@ use swfr_render::Renderer;
 use swfr_scene::{FrameEvents, Stage};
 use swfr_swf::{Movie, Tag};
 
+mod projector;
+pub use projector::{extract_projector_swf, ProjectorError};
+
 /// Fixed output audio sample rate in Hz (TSD 2.5, 2.8).
 pub const SAMPLE_RATE_HZ: u32 = 44_100;
 
@@ -361,13 +364,23 @@ impl Player {
                 limit: limits.max_input_file_size,
             });
         }
-
         #[cfg(feature = "m0-stub")]
         if swf_bytes == b"SWFR_STUB" {
             return Ok(Self::new_m0_stub(base_dir, opts));
         }
 
-        if swf_bytes.len() < 8 {
+        let embedded_swf = if swf_bytes.starts_with(b"FWS")
+            || swf_bytes.starts_with(b"CWS")
+            || swf_bytes.starts_with(b"ZWS")
+        {
+            swf_bytes
+        } else {
+            extract_projector_swf(swf_bytes).map_err(|e| {
+                PlayerError::ParseFailed(format!("not a SWF or supported Flash projector: {e:?}"))
+            })?
+        };
+
+        if embedded_swf.len() < 8 {
             return Err(PlayerError::MalformedHeader(
                 "SWF header shorter than 8-byte preamble",
             ));
@@ -379,7 +392,7 @@ impl Player {
             max_tag_count: limits.max_tag_count,
             max_shape_edges: limits.max_shape_edges,
         };
-        let movie = Movie::parse_with_limits(swf_bytes, &swf_limits)
+        let movie = Movie::parse_with_limits(embedded_swf, &swf_limits)
             .map_err(|e| PlayerError::ParseFailed(e.to_string()))?;
 
         if movie.header.frame_size.width_twips() <= 0
