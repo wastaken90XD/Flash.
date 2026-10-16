@@ -264,3 +264,113 @@ Each item becomes a test or a line in docs/KNOWN_LIMITATIONS.md.
 • Gnash's state beyond a 2017 mirror.
 • Whether Adobe's debug player is still obtainable.
 • The pages on frame order are old and one is a third party's inference. Real Flash Player output outranks all of them.
+
+Part 5: Ruffle study, split of the research (for the AI)
+The owner wants to understand how Ruffle works before deciding how much of it to reuse. The work is split. Claude did about 10%: the map in 5.1 and the access hints in 5.2. You do the other 90%: the work packages in 5.3, written up as notes. This is research only. Do not copy code and do not change swfr crates as part of it.
+Order: finish the end-to-end gates in 3.14 first. Then do the study. Then continue Part 3 with the owner's decision on the memo (5.5). If the owner has not decided, the default is option 1 from the earlier discussion: learn the mechanics and write your own.
+5.1 The map (verified by Claude)
+• Repository layout. Top-level parts are core (the emulator), desktop, render (backends), swf (SWF and ActionScript reading and writing), video, web and wstr (Flash-compatible UCS-2 strings). Player in core is the main entry point. Each platform feature is a trait passed into Player when it is created (render, audio, UI and so on), and a no-op null backend exists for each. Source: the Project Layout page of Ruffle's wiki.
+• Licenses. Ruffle is MIT OR Apache-2.0, and its third-party libraries are under compatible licenses. Its contributor guide says it uses no proprietary knowledge or code and is built from inspecting Flash Player output and from license-compatible libraries such as avmplus.
+• Frame loop. A FramePhase enum tracks where the player is in a frame: Idle, Enter, Construct, Update, FrameScripts, Exit. In AVM1 only the Update phase does work. It walks an execution list of clips, runs each clip's frame, then runs queued on-load actions. In AVM2 the phases run in order: enter frame, construct frame, run frame, frame scripts, exit frame. Source: pull request 7048 and core/src.
+• Modules seen in core/src. player.rs (events, drag, hover, with AVM1 and AVM2 differences), avm1/activation.rs (the opcode interpreter), avm1/function.rs, avm1/globals/, avm1/object/stage_object, display_object/movie_clip.rs, display_object/avm1_button.rs, display_object/container and interactive, context.rs (UpdateContext, RenderContext, an action queue), the library (instantiates characters by id), tag_utils.rs (SwfMovie, SwfSlice), and focus_tracker.rs.
+• Memory. Contexts carry a 'gc lifetime, and the garbage collector is the gc-arena crate (bumped to 0.7.0 in the v0.6.0 release notes).
+• Rendering. The RenderBackend trait takes shapes as DrawCommand lists from ruffle_render::shape_utils. The shipped backends use wgpu, and for the web a canvas or WebGL path. A software backend appears on the wiki only as an open question.
+• Tests. Regression movies live under tests/tests/swfs/avm1 and avm2. Each directory has test.swf, a source file, output.txt (recorded from the official debug Flash Player) and test.toml. Image checks need the imgtests feature. A scanner tool bulk-parses SWFs and an exporter tool writes PNG frames.
+• Build. Building the AS3 core needs Java on the path, to build the library of built-in classes.
+• Code comments are a data source. The interpreter records places where it deviates from the spec and where Flash Player behaves unexpectedly. For example, a comment says one opcode returns a boolean even in SWF 4, which differs from the spec. Another notes that AVM1 and AVM2 use separate random number generators.
+• Other useful pages. The wiki's Helpful Resources page links to Flash Player Oddities (behavior nobody fully understands), a SWF version chart, a debug Flash Player download page, an AS2 language reference and an AMF0 spec.
+5.2 Ground rules
+1. Read only. Your outputs are notes in docs/notes/ruffle/. Nothing else changes.
+2. Pin a version. Use the latest release tag and record its commit SHA at the top of every note. Ruffle moves fast.
+3. Own words. Describe behavior and structure. Do not paste code. A single identifier or a path with a line range is fine. The reason is that the owner has not yet decided whether to copy anything.
+4. Evidence. Every claim names a file path, the pinned commit and a symbol or line range, or else a wiki or issue link.
+5. Confidence. Mark each section high, medium or low, and say what you could not read.
+6. Access routes. GitHub blocks some page types for automated tools. Try the blob page, then raw.githubusercontent.com, then the docs.rs source viewer for published crates such as swf, then issues, pull requests and the wiki. If every route fails for a file, say so and move on. Do not guess its content.
+7. Verify by tests. For each note, pick at least three claims and confirm them against a regression test's output.txt or a documented Flash Player behavior.
+5.3 Work packages
+ID
+Topic
+Where to look
+Questions to answer
+Output
+R1
+Inventory
+Root Cargo.toml, each member's Cargo.toml, LICENSE.md, README.md
+Which crates exist, their sizes, the dependency graph, minimum Rust version, features, any C dependencies. Which crates are published on crates.io and which are not
+00-inventory.md
+R2
+Player and frame loop
+core/src/player.rs, context.rs, the frame-phase code, timer and action queue code
+How a tick turns elapsed time into frames. How many frames can run per tick. What triggers a render. How timers, the action queue and the exec list are ordered. How events from mouse and keyboard enter. How this maps onto one retro_run per frame
+01-player-frame-loop.md
+R3
+The swf crate
+swf/src (read via docs.rs if needed)
+Module layout, the tag enum, how AVM1 actions and shapes are parsed, handling of malformed lengths and truncated data, version gating, how compression is handled, how writing works. Compare with swfr-swf and list gaps
+02-swf-crate.md
+R4
+Display list and timeline
+core/src/display_object/*, tag_utils.rs, library code
+How tags are processed per frame. Place and replace and move semantics, ratio, clip depth, names. Preloading. Goto frame behavior. Buttons and hit testing. Text objects
+03-display-list.md
+R5
+AVM1
+core/src/avm1/*, activation.rs, function.rs, globals/, object/
+Value and object model, prototype chains, property flags, scopes, registers, constant pools, function calls (this, arguments, super), coercion rules, SWF-version-gated behavior, recursion and time limits, how built-ins are registered and which exist
+04-avm1.md
+R6
+Memory and GC
+gc-arena use in core, Collect derives
+How the arena and the collector are used, when collection runs, cost of the 'gc lifetime design, what it means for a 512 MB device, comparison with the handle-based design in 2.9
+05-gc-memory.md
+R7
+Rendering
+render/*, shape_utils, RenderBackend trait
+The trait's methods, shape registration, how fills and strokes become draw commands, bitmaps, masks, blend modes, filters, hairline handling, what a tiny-skia backend would need
+06-render.md
+R8
+Audio
+Audio backend trait, mixer, sound instances, decoders
+Event versus streaming sound, sync to the timeline, resampling, supported codecs, how stream blocks tie to frames
+07-audio.md
+R9
+Input and UI
+Input events, key code tables, focus tracker, UI backend trait
+Event types, key code mapping, text input, cursor handling, what a gamepad-to-cursor layer must provide
+08-input.md
+R10
+Tests
+tests/, regression_tests.rs, tests/README.md, scanner, exporter, fuzz tests
+Harness design, the test.toml fields, how expected output is produced, known-failure handling, counts per directory, which directories look safest to reuse as a corpus, and each directory's license status
+09-tests.md
+R11
+Quirks
+Code comments on deviations from the spec, the Flash Player Oddities page, issues labeled as accuracy
+A catalog of at least 100 behaviors: what Flash Player does, which SWF versions, where it was found, and a test idea for each
+10-quirks.md
+R12
+Fit for legacy targets
+Dependency lists from R1
+Could ruffle_core build for ARMv7 and Android API 21 and stay within 6 MB and 32 MB idle? Is it usable as a library from a git dependency? What breaks without a GPU? Optionally write ruffle-probe.yml, a manual workflow that builds a pinned ruffle_core for x86_64 and ARMv7 and reports size, time and dependency counts. The owner reviews the workflow before it runs
+11-fit.md
+R13
+Decision memo
+All notes
+For each component (parser, display list, AVM1, GC, render, audio, input, tests): reimplement, vendor, depend on, or skip. Give rationale, effort in pull requests, risk, license obligations, and how a docs/PORTED.md ledger would work if anything is copied
+12-decision-memo.md
+5.4 Quality bar
+• A note is done when a developer who has never opened Ruffle could implement the behavior from it.
+• Prefer concrete rules over summaries. For example: in this phase, this list is walked in this order, and these things are queued.
+• Each note ends with a list of open questions and a list of test ideas for swfr.
+• docs/notes/ruffle/00-index.md links every note with its commit SHA and confidence.
+5.5 Order, time-box and decision
+1. Do R1, then R2, R3, R5, R4, R7, R10 and R12, then R6, R8, R9 and R11, then R13.
+2. One pull request per note, merged into dev.
+3. Time-box each package. If a package is not finished after its pull request, write what is missing and move on.
+4. When R13 is merged, open an issue titled ruffle-study-complete with the memo's table in the body, and label it question. Then return to Part 3.
+5. Until the owner replies, apply option 1. Do not vendor or depend on Ruffle code.
+5.6 What Claude did not check
+• The contents of most files in core/src. The map is built from search results, the wiki and pull request pages.
+• Whether the AI's tools can read GitHub source pages. Claude's own fetch of GitHub directory pages was refused.
+• Test license status, binary sizes, minimum Rust version and build behavior on ARMv7 or Android 5.
+• Whether the unpublished crates in the repository can be used as git dependencies.
