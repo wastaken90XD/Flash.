@@ -327,6 +327,89 @@ R7
 Rendering
 render/*, shape_utils, RenderBackend trait
 The trait's methods, shape registration, how fills and strokes become draw commands, bitmaps, masks, blend modes, filters, hairline handling, what a tiny-skia backend would need
+
+
+Part 9: winebox, BoxedWine as a libretro core (for the AI and the owner)
+The owner wants the equivalent of DOSBox, but for Wine, inside RetroArch. The closest existing project is BoxedWine. This part plans a libretro port of it as a separate core, winebox, that plays .swf files with the real Flash Player projector. It is separate from swfr and from Part 8. It does not block Parts 3 to 7.
+9.1 What BoxedWine is
+• An emulator that runs Windows applications by running a 32-bit Wine and emulating the Linux kernel and the CPU. It is written in C++ with SDL. It is released under GPL-2.0.
+• It runs 16-bit and 32-bit Windows programs, supports several Wine versions, up to Wine 11, and uses Tiny Core Linux as its base file system.
+• Tested platforms listed in its README: Web (Emscripten), Linux x86-64 and ARM64, macOS on ARM, Windows x86-64 and ARM64. Older READMEs also list Raspberry Pi 4 in 32-bit and 64-bit. Android is not in the tested list I found.
+• CPU emulation has two kinds. The normal core is an interpreter that works on every architecture. The JIT core is much faster but exists only for x86, x64 and ARMv8 (ARM64).
+• One of its published figures: on a Raspberry Pi 4 in 32-bit mode a GDI benchmark scored 14, against 133 on 64-bit ARM with the JIT.
+• On first run it downloads the Wine and Linux file system. A libretro core cannot do that at runtime.
+• A libretro forum thread suggests wrapping its main loop in libretro functions, so that retro_run produces a frame of video and audio. I found no existing libretro port.
+9.2 Fit
+Need
+BoxedWine
+Runs the real Flash projector, up to Flash 32
+Yes in principle: a 32-bit Windows program under Wine. Test it. Use a projector from before June 2020, the update that added the kill switch
+Works inside RetroArch
+Needs a port: replace its SDL video, audio and input with libretro
+Modern ARM64 and x86-64 devices
+Has a JIT, so it should be reasonable
+Android 5 ARMv7
+No JIT for ARMv7, so the slow interpreter. Likely too slow, unmeasured. Android itself is untested upstream
+Light
+No. A Linux file system plus Wine is hundreds of megabytes, and CPU cost is high
+9.3 Design
+• Source: a workflow vendors BoxedWine at a pinned commit into winebox/third_party/boxedwine/ by pull request. Keep it separate from the swfr crates. It is GPL-2.0, and this is a personal fork.
+• Libretro layer: replace the SDL video, audio and input backends. The emulator runs on its own thread or threads. retro_run copies the newest frame into the frontend's XRGB buffer, delivers exactly the audio frames due (silence on underrun), and queues input events. retro_unload_game stops the threads cleanly.
+• Content: a .swf file is placed in a temporary host folder that the guest sees as a drive. Wine starts the Flash projector on it. A core option chooses the projector.
+• File system: a Wine and Tiny Core file system archive placed in system/winebox/ by the owner or by a workflow. It is unpacked once into the saves directory. Check its hash on every start. No downloads at runtime.
+• Core options: CPU core (normal or JIT where available), emulated memory, screen size, Wine version, projector choice.
+• Info file: winebox_libretro.info with the extension swf.
+9.4 Stages
+Stage
+Work
+Done when
+W0
+Research: read BoxedWine's docs and source layout, how SDL is used, its command line, how a program is started, which Wine components a Flash projector needs, memory needs, and the interpreter speed data. Write docs/winebox/NOTES.md with sources
+Notes merged, unverified items marked
+W1
+CI builds unmodified BoxedWine for Linux x64, Windows x64 and Android ARMv7 and ARM64 (NDK). Run a Flash projector benchmark on Linux in CI if a headless mode works
+Build artifacts from every target. A CI log of the headless run, or a documented reason it could not run
+W2
+The libretro port with the mock-frontend ABI tests (frames, audio counts, input, clean unload) and a sample .swf
+The ABI tests pass. The core plays a sample .swf on Linux x64
+W3
+Packaging: the file system archive layout, first-run unpack, the integrity check, .info, install notes
+Fresh install works from the notes
+W4
+Device benchmarks by the owner with the three benchmark SWFs from Part 8
+Results in the winebox issue
+9.5 Owner tasks
+• Supply a Flash projector from before the kill switch and a Wine file system archive, and put them where the notes say.
+• Test on a modern ARM64 phone or tablet, a Windows PC and the Android 5 device. Record frame rate, audio, input feel, memory use, start time and battery.
+9.6 Decision gate
+• Worth keeping: it holds at least 80% of the declared frame rate on the benchmarks on a modern device, and starts a game within about 90 seconds.
+• ARMv7: report the result with numbers. If it is unusable there, state that winebox supports only devices with a JIT, and that swfr covers the old ones.
+9.7 Limits and risks
+1. No ARMv7 JIT, so old Android devices are probably out.
+2. Android is not an upstream-tested platform.
+3. The emulator's threads and the libretro single-thread model need careful handoff.
+4. The file system is large and cannot be downloaded at runtime.
+5. Older BoxedWine READMEs say that games after 2000 had limited success. Newer versions are faster. Flash under Wine is the thing to test first.
+6. GPL-2.0: keep it separate from swfr.
+7. The real projector is the owner's responsibility, and nothing is distributed.
+9.8 Source access and the licensing firewall
+• Authorization. The owner authorizes reading, modifying and building BoxedWine's GPL-2.0 source for the winebox work. For that work only, this overrides the rule against reading copyleft source in 2.3 and Part 4.
+• What to read. Read what matters for the port, not every one of its roughly 5,000 files: platform/sdl (the window, events, OpenGL and audio), the platform interfaces it implements, the kernel scheduler, the CPU core selection, the docs folder including docs/CPUemulation.md, the file system root and ZIP options, the command line handling and the build files. List in docs/winebox/NOTES.md which files you read and which you did not.
+• Firewall. All BoxedWine-derived code stays under winebox/, with its own build and tests. Never copy code from it into any swfr crate, and never the other way. No swfr crate may depend on it. When you work on swfr, do not consult BoxedWine source. Use separate branches named winebox/<slug>.
+• License note. This is a personal fork and nothing is distributed. GPL-2.0 obligations attach when you distribute. If the owner ever shares the core, the whole winebox core must be offered under GPL-2.0 with its source. Record this in winebox/LICENSE-NOTE.md.
+• Upstream status. Issue 17 in the BoxedWine repository, which asks about a libretro core, is still open. The author said in 2021 that it should be possible because the SDL layer in platform/sdl is well abstracted, and that there were no plans. No libretro port exists upstream.
+9.9 Shape of the first prototype
+• A separate experimental core that launches one user-supplied Win32 program (the Flash projector, given a .swf) from a packaged Wine and root file system.
+• A virtual writable drive, and software-rendered output only. OpenGL, Vulkan and applications with several windows are a later step.
+• The libretro constraints decide the design: all work is surfaced through retro_run, input is polled, and every guest window reaches the frontend as a single video output. The SDL backend currently owns window creation, event waits and GL or Vulkan windows, so the backend is replaced or adapted, not just recompiled as a library.
+• Booting Windows XP is out of scope. BoxedWine runs Windows applications under Wine. It does not emulate a whole PC.
+
+
+
+
+
+
+
 06-render.md
 R8
 Audio
