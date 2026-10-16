@@ -52,10 +52,31 @@
 
 ---
 
-## 4. Count of Regression Tests and AVM1 Breakdown (`Confidence: High`)
+## 4. Count of Regression Tests, License Status per Directory, and Safe Corpus Reuse (`Confidence: High`)
 
-- Across `/tmp/ruffle-study/tests/tests/swfs/**/test.toml`, there are **4,451 `test.toml` suites**:
-  - `from_avmplus`: 1,574 | `avm2`: 1,284 | **`avm1`: 743** | `from_gnash`: 404 | `from_shumway`: 229 | `visual`: 147 | `timeline`: 17 | `mixed_avm`: 12 | `text`: 11 | `fonts`: 8 | `stage3d`: 7 | `swf`: 7 | `audio`: 5 | `import_assets`: 3.
+- **How Expected `output.txt` Is Produced (`tests/src/flashplayer.rs:10-50`, `tests/src/flashplayer/environment/linux.rs:1-42`, `tests/README.md:1-60`):**
+  - Ruffle's `ruffle_test` CLI (`tests/src/main.rs`) can invoke an external standalone Adobe Flash Player Debug Projector (`FlashPlayer::run`, `tests/src/flashplayer.rs:19-50`), which writes `trace()` output to `flashlog.txt` (`environment.read_log()`), and saves the resulting ground-truth output as `output.txt`.
+  - Additionally, `scanner/` (`ruffle_scanner`, 8 files, 987 LOC) batch-runs large SWF archives to collect crash/stub telemetry, `exporter/` (`exporter`, 7 files, 916 LOC) renders SWF frames to PNGs via `wgpu`, and `fuzz/` (`fuzz/src/parse_swf.rs:1-7`) fuzzes `swf::decompress_swf` + `swf::parse_swf` under `libfuzzer-sys` and `afl`.
+- **Directory Counts, License Status, and Corpus Reuse Safety (`tests/tests/swfs/**/test.toml`):**
+
+| Directory (`tests/tests/swfs/<dir>`) | `test.toml` Count | License (`README.md` / Root `LICENSE.md`) | Safe to Reuse Under TSD 4.1? |
+|---|---:|---|---|
+| `avm1/` | **743** | `MIT OR Apache-2.0` (`LICENSE.md:1-10`) | **Yes — Safest primary AVM1 corpus** |
+| `avm2/` | **1,284** | `MIT OR Apache-2.0` (`LICENSE.md:1-10`) | **Yes** (AVM2/AS3 tests) |
+| `visual/` | **147** | `MIT OR Apache-2.0` (`LICENSE.md:1-10`) | **Yes** (Rendering/mask/blend/filter tests) |
+| `timeline/` | **17** | `MIT OR Apache-2.0` (`LICENSE.md:1-10`) | **Yes** |
+| `mixed_avm/` | **12** | `MIT OR Apache-2.0` (`LICENSE.md:1-10`) | **Yes** |
+| `text/` | **11** | `MIT OR Apache-2.0` (`LICENSE.md:1-10`) | **Yes** |
+| `fonts/` | **8** | `MIT OR Apache-2.0` + `SIL OFL 1.1` (`LICENSE.md:27-31`) | **Yes** |
+| `stage3d/` | **7** | `MIT OR Apache-2.0` (`LICENSE.md:1-10`) | **Yes** |
+| `swf/` | **7** | `MIT OR Apache-2.0` (`LICENSE.md:1-10`) | **Yes** |
+| `audio/` | **5** | `MIT OR Apache-2.0` (`LICENSE.md:1-10`) | **Yes** |
+| `import_assets/` | **3** | `MIT OR Apache-2.0` (`LICENSE.md:1-10`) | **Yes** |
+| `from_shumway/` | **229** | `Apache-2.0` (`tests/tests/swfs/from_shumway/README.md:5-8`) | **Yes** (Permissive Apache-2.0) |
+| `from_avmplus/` | **1,574** | **`MPL-2.0`** (`tests/tests/swfs/from_avmplus/README.md:5-7`) | **NO** — Weak copyleft (`MPL-2.0`), excluded by TSD 4.1 |
+| `from_gnash/` | **404** | **`GPL-3.0`** (`tests/tests/swfs/from_gnash/README.md:8-11`) | **NO** — Strong copyleft (`GPL-3.0`), strictly forbidden by TSD 4.1 |
+| **Total** | **4,451** | | **2,473 permissive (`avm1/` = 743) / 1,978 copyleft** |
+
 - **Breakdown of the 743 `tests/tests/swfs/avm1/` suites by category:**
 
 | AVM1 Category | Count | Representative Suites |

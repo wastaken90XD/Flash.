@@ -50,12 +50,24 @@
 
 ---
 
-## 4. Dependency Footprint, Binary Size, Cross-Compilation, and Notice Integrity (`Confidence: High`)
+## 4. Legacy Targets (ARMv7 / Android API 21, 6 MB Binary / 32 MB Idle RAM), Git Dependency Usability, and GPU-less Behavior (`Confidence: High`)
 
-- **Dependency Footprint & Binary Size:**
-  - `ruffle_core` pulls in ~180–250 transitive crates (depending on audio/codec features), `proc-macro` crates (`gc-arena-derive`, `ruffle_macros`), and embeds `core/assets/library.swf` (~60+ KiB of AVM2 Flash player builtins via `core/build.rs:1-46`), increasing stripped `.so`/`.dll`/`.dylib` size from `swfr`'s ~1.2 MB to ~15–25 MB and lengthening clean CI builds.
-- **Cross-Compilation across our 5 CI targets (`x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-pc-windows-msvc`, `x86_64-apple-darwin`, `aarch64-apple-darwin`):**
-  - `ruffle_core` with default features (`mp3`, `aac`, `nellymoser`, `flate2/zlib`) is pure Rust (no C/C++ `cc` or `bindgen` build scripts unless `lzma-sys` or `openxr` is enabled), so it cross-compiles cleanly to all 5 targets on Rust `>= 1.85` (`edition = "2024"`).
+- **Could `ruffle_core` build for ARMv7 and Android API 21 and stay within 6 MB binary size and 32 MB idle RAM?**
+  1. **ARMv7 & Android API 21 Compilation:** `wstr/src/ptr.rs:39-40` supports both 32-bit (`target_pointer_width = "32"`) and 64-bit targets, and pure-Rust default features compile for `armv7-unknown-linux-gnueabihf` and `armv7-linux-androideabi` (when `lzma-sys` / `openxr` C dependencies are disabled).
+  2. **6 MB Binary Size Budget: NO (Exceeds budget).** `ruffle_core` (162,449 LOC) embeds `core/assets/library.swf` (`core/build.rs:1-46`) and `core/assets/notosans.subset.ttf.gz` (`core/src/player.rs:85`), and `ruffle_render` unconditionally pulls in `wgpu = "30.0.1"` and `naga = "29.0.0"` (`render/Cargo.toml:27-36`), plus `harfrust`, `ttf-parser`, `symphonia`, `gif`, `png`, `jpeg-decoder`, and `webp`. Even stripped with LTO, a `cdylib` linking `ruffle_core` is ~12–20 MB (2–3x over the 6 MB budget), whereas `swfr_libretro` is ~1.2 MB.
+  3. **32 MB Idle RAM Budget (on a 512 MB device): Borderline / Exceeds.** On startup (`Player::new`, `core/src/player.rs:2969-3135`), `ruffle_core` allocates `GcArena` (`GcRootData`), parses and loads `library.swf` into the AVM2 `player_domain`, pre-allocates **two** complete AVM1 global/prototype object graphs (one case-insensitive for SWF <= 6 and one case-sensitive for SWF >= 7 in `core/src/avm1/runtime.rs:193-201`), and interns `CommonStrings` (`core/common/src/avm_string/interner.rs:61-76`), consuming ~25–45 MB of heap before the game SWF allocates a single frame.
+- **Is `ruffle_core` usable as a library from a Cargo `git` dependency?**
+  - Technically Cargo can resolve `ruffle_core = { git = "https://github.com/ruffle-rs/ruffle", tag = "v0.7.1" }`, **but** with major caveats:
+    1. Requires Rust `>= 1.85.0` because the workspace uses `edition = "2024"` (`Cargo.toml:42`).
+    2. `ruffle_core` has `publish = false` (`core/Cargo.toml:7`), meaning `swfr` could never be published to crates.io while depending on it.
+    3. `ruffle_render` (`render/Cargo.toml:36`) has a non-optional dependency on `wgpu = "30.0.1"`, forcing every downstream build to compile `wgpu` and `naga` even when using a software renderer!
+    4. Adds ~200+ transitive crates to `Cargo.lock`, conflicting with `deps-allow.txt` discipline.
+- **What breaks without a GPU?**
+  - Without a GPU (`ruffle_render_wgpu`), `ruffle_core` has no built-in desktop CPU rasterizer (`ruffle_render_canvas` is WASM/Web-only via `web-sys`, `render/canvas/Cargo.toml:17-35`). Unless a custom CPU `RenderBackend` (e.g., backed by `tiny-skia`) is written:
+    - Stage rendering produces no pixels (`NoOpRenderBackend`).
+    - `BitmapData.draw()` fails or no-ops if `RenderBackend::is_offscreen_supported()` returns `false` (`render/src/backend.rs:49-51`).
+    - Bitmap filters (`BlurFilter`, `GlowFilter`, `DropShadowFilter`, `BevelFilter`, `ColorMatrixFilter`, `ConvolutionFilter`, `DisplacementMapFilter`, `ShaderFilter`) are skipped when `is_filter_supported()` returns `false` (`render/src/backend.rs:67-69`).
+    - `Stage3D` (`create_context3d`, `render/src/backend.rs:104-106`) and `PixelBender` shaders return `None` / unsupported.
 - **Notice Integrity (`LICENSE.md`):**
   - Ruffle is dual-licensed `MIT OR Apache-2.0` (`Cargo.toml:46`, `LICENSE.md:1-31`), and `LICENSE.md:11-31` documents bundled third-party notices (`Adobe Flex` Apache-2.0, `Adobe asc.jar`/`playerglobal.swc` in tests only, `Noto Sans` SIL OFL 1.1). Under Option 1 (no Ruffle runtime code depended on), `swfr`'s own MIT/Apache-2.0 notice remains self-contained; if any Ruffle crate were ever added under Option 2/3, `deps-allow.txt` and `NOTICE` would need to list Ruffle and its transitive crates.
 
