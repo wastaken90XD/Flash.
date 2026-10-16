@@ -407,6 +407,33 @@ Results in the winebox issue
 
 
 
+Part 10: No license policy (for the AI)
+The owner has decided that this is a personal fork. It is not distributed, and license compliance is not a goal. Everything in Parts 1 to 9 that exists only for license reasons is void. This part overrides every earlier statement about licenses, including 2.3, 2.16, 3.11, Part 4, Part 5, 6.3, 7.1 (D3) and 9.8. Technical rules stay: budgets, tests, the unsafe policy, the dependency allowlist, security advisories, and the end-to-end gates in 3.14.
+10.1 Rules that no longer apply
+• The clean-room rule, including the ban on reading, porting or translating other players' source code, and the ban on reading copyleft code (GPL, LGPL, AGPL, MPL).
+• The firewall between swfr and winebox. Code may move between them in either direction.
+• The legal ground rules in 4.2 and every never-use-it entry in 4.1, including swf-parser, Tamarin and avmplus, Gnash and Lightspark.
+• The own-words requirement and the no-copying rule for notes and for Ruffle study material, the docs/PORTED.md ledger, and the notice-integrity check.
+• License checks in CI: the license allowlist in deny.toml (keep the security advisories check), the license-evidence requirement and its CI check for rows in corpus/real/MANIFEST.toml, THIRD_PARTY.md as a license list, and license notes in references.lock.
+• License files and sections: LICENSE-MIT, LICENSE-APACHE, THIRD_PARTY_LICENSES.md, license text in README.md, and license files in release zips.
+• Checking the license or origin of test files before using them. Test directories derived from GPL or MPL sources, such as from_gnash and from_avmplus, may be used.
+10.2 What is allowed now
+• Read any source code, in any license: Ruffle, Gnash, Lightspark, swfdec, gameswf, Tamarin, BoxedWine, DOSBox Pure and others.
+• Copy, port or vendor code from any of them into the repository, whole modules or whole crates. Reference documents and test files from any source may be committed.
+• Choosing how much to copy is a technical decision. Judge it by size, memory, speed, correctness, the unsafe policy and test results. When you copy code, add a one-line comment saying where it came from, only so that you can find and update it later.
+• If ported code conflicts with a technical rule, for example unsafe outside ffi, open an issue that explains the conflict and proposes an exception. The owner decides.
+10.3 One practical item that is not about licenses
+The repository is currently public. A public repository is publication, and publishing other people's proprietary material, such as Adobe documents, Flash Player binaries or Windows images, invites takedown requests. The owner should make the repository private. Until then, keep proprietary binaries and disk images out of the repository, as 8.4 and 9.5 already say.
+10.4 Actions
+1. Edit AGENTS.md and docs/TSD.md in the repository: remove or mark void every license-driven rule listed in 10.1.
+2. Remove the license checks from CI as listed in 10.1. Keep the advisories check and keep CI green.
+3. Delete the license files and license text listed in 10.1.
+4. Redo the R13 decision memo on technical merits only, since license was a reason for some of its verdicts. The earlier technical objections still stand: ruffle_render pulls in wgpu, gc-arena changes every type with lifetimes, and ruffle_wstr uses unsafe pointer tricks. Decide which components to port from Ruffle, such as the swf crate, shape handling, and AVM1 mechanics, to reach correctness fastest within the budgets. Post the updated memo in the ruffle-study-complete issue.
+5. Continue with Part 7's order of work.
+
+
+
+
 
 
 
