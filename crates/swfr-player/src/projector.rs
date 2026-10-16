@@ -30,8 +30,12 @@ pub fn extract_projector_swf(bytes: &[u8]) -> Result<&[u8], ProjectorError> {
                 bytes.get(footer + 6).copied().unwrap_or(0),
                 bytes.get(footer + 7).copied().unwrap_or(0),
             ]) as usize;
-            let start = footer.checked_sub(len).ok_or(ProjectorError::InvalidMovieExtent)?;
-            let swf = bytes.get(start..footer).ok_or(ProjectorError::InvalidMovieExtent)?;
+            let start = footer
+                .checked_sub(len)
+                .ok_or(ProjectorError::InvalidMovieExtent)?;
+            let swf = bytes
+                .get(start..footer)
+                .ok_or(ProjectorError::InvalidMovieExtent)?;
             return if is_swf_signature(swf) {
                 Ok(swf)
             } else {
@@ -74,8 +78,8 @@ fn is_swf_signature(bytes: &[u8]) -> bool {
 #[allow(clippy::unwrap_used, clippy::panic, clippy::indexing_slicing)]
 mod tests {
     use super::*;
-    use swfr_testkit::SwfBuilder;
     use swfr_swf::Tag;
+    use swfr_testkit::SwfBuilder;
 
     fn sample_swf() -> Vec<u8> {
         let mut b = SwfBuilder::new(8, 32, 24, 12.0, 1);
@@ -106,7 +110,13 @@ mod tests {
         let mut exe = b"MZPE-stub".to_vec();
         exe.extend_from_slice(&0xFA12_3456_u32.to_le_bytes());
         exe.extend_from_slice(&u32::MAX.to_le_bytes());
-        assert_eq!(extract_projector_swf(&exe), Err(ProjectorError::InvalidMovieExtent));
-        assert_eq!(extract_projector_swf(b"MZ/not-a-projector"), Err(ProjectorError::MissingMovie));
+        assert_eq!(
+            extract_projector_swf(&exe),
+            Err(ProjectorError::InvalidMovieExtent)
+        );
+        assert_eq!(
+            extract_projector_swf(b"MZ/not-a-projector"),
+            Err(ProjectorError::MissingMovie)
+        );
     }
 }

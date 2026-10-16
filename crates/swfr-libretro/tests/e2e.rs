@@ -2230,7 +2230,11 @@ fn e2e_flash_projector_exe_extracts_and_runs_embedded_swf() {
     init_abi_callbacks();
 
     let mut builder = SwfBuilder::new(8, 64, 48, 12.0, 1);
-    builder.push_tag(&Tag::SetBackgroundColor { r: 0x22, g: 0x44, b: 0x66 });
+    builder.push_tag(&Tag::SetBackgroundColor {
+        r: 0x22,
+        g: 0x44,
+        b: 0x66,
+    });
     builder.push_tag(&Tag::ShowFrame);
     let swf = builder.build();
     let mut exe = b"MZ-Flash-Projector-stub".to_vec();
@@ -2249,7 +2253,10 @@ fn e2e_flash_projector_exe_extracts_and_runs_embedded_swf() {
     let frontend = FRONTEND.lock().unwrap();
     assert_eq!(frontend.last_width, 64);
     assert_eq!(frontend.last_height, 48);
-    assert_eq!(frontend.video_frames.last().and_then(|f| f.first()), Some(&0x0022_4466));
+    assert_eq!(
+        frontend.video_frames.last().and_then(|f| f.first()),
+        Some(&0x0022_4466)
+    );
     drop(frontend);
     retro_unload_game();
     retro_deinit();

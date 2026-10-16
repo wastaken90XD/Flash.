@@ -1580,8 +1580,7 @@ impl Avm1 {
             });
         if let Some(fid) = fid_opt {
             if self.heap.is_function(fid) {
-                let prev_base =
-                    core::mem::replace(&mut self.base_clip_path, clip_path.to_owned());
+                let prev_base = core::mem::replace(&mut self.base_clip_path, clip_path.to_owned());
                 let prev_clip =
                     core::mem::replace(&mut self.current_clip_path, clip_path.to_owned());
                 let mut budget = self.max_ops_per_run;
@@ -1803,11 +1802,12 @@ impl Avm1 {
                             self.queue_goto_frame(stage, &cur_path, f, *play_after);
                         }
                         Value::String(s) => {
-                            let (clip_p, frame_part) = if let Some((prefix, rest)) = s.rsplit_once(':') {
-                                (self.resolve_target_path(prefix, stage), rest)
-                            } else {
-                                (cur_path, s.as_str())
-                            };
+                            let (clip_p, frame_part) =
+                                if let Some((prefix, rest)) = s.rsplit_once(':') {
+                                    (self.resolve_target_path(prefix, stage), rest)
+                                } else {
+                                    (cur_path, s.as_str())
+                                };
                             let resolved = stage
                                 .timeline_by_path(&clip_p)
                                 .and_then(|tl| tl.resolve_label(frame_part));
@@ -3136,7 +3136,12 @@ impl Avm1 {
                 "getnexthighestdepth" => {
                     let next_d = stage
                         .timeline_by_path(path)
-                        .and_then(|tl| tl.display_list.keys().next_back().map(|d| d.saturating_add(1)))
+                        .and_then(|tl| {
+                            tl.display_list
+                                .keys()
+                                .next_back()
+                                .map(|d| d.saturating_add(1))
+                        })
                         .unwrap_or(0);
                     Value::Number(f64::from(next_d))
                 }
@@ -3295,7 +3300,9 @@ impl Avm1 {
             if btag == "Object" && norm == "registerclass" {
                 let sym = args
                     .first()
-                    .map_or_else(String::new, |v| v.to_avm_string(self.swf_version, &self.heap))
+                    .map_or_else(String::new, |v| {
+                        v.to_avm_string(self.swf_version, &self.heap)
+                    })
                     .to_ascii_lowercase();
                 if let Some(&Value::Object(ctor_id)) = args.get(1) {
                     self.registered_classes.insert(sym, ctor_id);
