@@ -9,6 +9,7 @@ class SdlInputAdapter {
 public:
     SdlInputAdapter(retro_input_poll_t poll, retro_input_state_t state, unsigned width, unsigned height);
     void set_dimensions(unsigned width, unsigned height);
+    void set_callbacks(retro_input_poll_t poll, retro_input_state_t state);
     void poll_and_enqueue();
     void reset();
 

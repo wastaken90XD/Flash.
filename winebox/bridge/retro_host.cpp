@@ -18,6 +18,19 @@ RetroHost::RetroHost(retro_video_refresh_t video,
       input_state_(input_state),
       max_audio_frames_(max_audio_frames) {}
 
+void RetroHost::set_video_callback(retro_video_refresh_t video) noexcept {
+    video_ = video;
+}
+
+void RetroHost::set_audio_callback(retro_audio_sample_batch_t audio) noexcept {
+    audio_ = audio;
+}
+
+void RetroHost::set_input_callbacks(retro_input_poll_t poll, retro_input_state_t state) noexcept {
+    input_poll_ = poll;
+    input_state_ = state;
+}
+
 bool RetroHost::publish_video(const std::uint32_t* pixels,
                               unsigned width,
                               unsigned height,

@@ -41,6 +41,15 @@ std::int16_t RETRO_CALLCONV input_state(unsigned port, unsigned device, unsigned
 } // namespace
 
 int main() {
+    winebox::RetroHost late_video_host(nullptr, audio_batch, input_poll, input_state, 4);
+    const std::array<std::uint32_t, 1> late_pixel = {0x00123456};
+    assert(late_video_host.publish_video(late_pixel.data(), 1, 1, sizeof(std::uint32_t)));
+    assert(!late_video_host.present_video());
+    late_video_host.set_video_callback(video_refresh);
+    assert(late_video_host.present_video());
+    assert(video_width == 1 && video_height == 1);
+    assert(video_copy == std::vector<std::uint32_t>{0x00123456});
+
     winebox::RetroHost host(video_refresh, audio_batch, input_poll, input_state, 4);
 
     // Padded source rows are copied into a tightly packed frontend frame.

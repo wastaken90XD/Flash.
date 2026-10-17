@@ -28,6 +28,11 @@ public:
                        unsigned height,
                        std::size_t source_pitch);
 
+    // Frontend callbacks can be installed or replaced after retro_init().
+    void set_video_callback(retro_video_refresh_t video) noexcept;
+    void set_audio_callback(retro_audio_sample_batch_t audio) noexcept;
+    void set_input_callbacks(retro_input_poll_t poll, retro_input_state_t state) noexcept;
+
     // Called from the libretro thread. Double-buffer swapping keeps the frame
     // stable during the callback without copying it a second time.
     bool present_video();

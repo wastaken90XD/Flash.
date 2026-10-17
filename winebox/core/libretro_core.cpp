@@ -218,11 +218,35 @@ RETRO_API void RETRO_CALLCONV retro_set_environment(retro_environment_t callback
     callback(RETRO_ENVIRONMENT_SET_VARIABLES, const_cast<retro_variable*>(variables));
 }
 
-RETRO_API void RETRO_CALLCONV retro_set_video_refresh(retro_video_refresh_t callback) { g_video = callback; }
-RETRO_API void RETRO_CALLCONV retro_set_audio_sample(retro_audio_sample_t callback) { g_audio_sample = callback; }
-RETRO_API void RETRO_CALLCONV retro_set_audio_sample_batch(retro_audio_sample_batch_t callback) { g_audio_batch = callback; }
-RETRO_API void RETRO_CALLCONV retro_set_input_poll(retro_input_poll_t callback) { g_input_poll = callback; }
-RETRO_API void RETRO_CALLCONV retro_set_input_state(retro_input_state_t callback) { g_input_state = callback; }
+RETRO_API void RETRO_CALLCONV retro_set_video_refresh(retro_video_refresh_t callback) {
+    g_video = callback;
+    if (g_host)
+        g_host->set_video_callback(callback);
+}
+RETRO_API void RETRO_CALLCONV retro_set_audio_sample(retro_audio_sample_t callback) {
+    g_audio_sample = callback;
+    if (g_host && !g_audio_batch)
+        g_host->set_audio_callback(single_sample_batch);
+}
+RETRO_API void RETRO_CALLCONV retro_set_audio_sample_batch(retro_audio_sample_batch_t callback) {
+    g_audio_batch = callback;
+    if (g_host)
+        g_host->set_audio_callback(g_audio_batch ? g_audio_batch : single_sample_batch);
+}
+RETRO_API void RETRO_CALLCONV retro_set_input_poll(retro_input_poll_t callback) {
+    g_input_poll = callback;
+    if (g_host)
+        g_host->set_input_callbacks(g_input_poll, g_input_state);
+    if (g_input)
+        g_input->set_callbacks(g_input_poll, g_input_state);
+}
+RETRO_API void RETRO_CALLCONV retro_set_input_state(retro_input_state_t callback) {
+    g_input_state = callback;
+    if (g_host)
+        g_host->set_input_callbacks(g_input_poll, g_input_state);
+    if (g_input)
+        g_input->set_callbacks(g_input_poll, g_input_state);
+}
 RETRO_API void RETRO_CALLCONV retro_set_controller_port_device(unsigned, unsigned) {}
 
 RETRO_API void RETRO_CALLCONV retro_init(void) {

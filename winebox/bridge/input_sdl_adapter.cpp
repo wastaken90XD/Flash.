@@ -131,6 +131,11 @@ void SdlInputAdapter::set_dimensions(unsigned width, unsigned height) {
     cursor_y_ = std::clamp(cursor_y_, 0, static_cast<int>(height_ - 1));
 }
 
+void SdlInputAdapter::set_callbacks(retro_input_poll_t poll, retro_input_state_t state) {
+    poll_ = poll;
+    state_ = state;
+}
+
 void SdlInputAdapter::reset() {
     key_down_.fill(false);
     left_down_ = false;
