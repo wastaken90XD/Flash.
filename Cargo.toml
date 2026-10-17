@@ -1,0 +1,59 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/swfr-reader",
+    "crates/swfr-swf",
+    "crates/swfr-scene",
+    "crates/swfr-render",
+    "crates/swfr-avm1",
+    "crates/swfr-avm2",
+    "crates/swfr-audio",
+    "crates/swfr-player",
+    "crates/swfr-libretro",
+    "crates/swfr-harness",
+    "crates/swfr-testkit",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+rust-version = "1.99.0"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+panic = "deny"
+arithmetic_side_effects = "warn"
+chunks_exact_to_as_chunks = "allow"
+collapsible_if = "allow"
+collapsible_match = "allow"
+field_reassign_with_default = "allow"
+too_many_arguments = "allow"
+too_many_lines = "allow"
+
+[workspace.dependencies]
+fontdue = "0.9.4"
+lzma-rs = "0.3.0"
+miniz_oxide = "0.9.1"
+png = "0.18.1"
+symphonia = { version = "0.5.5", default-features = false, features = ["mp3"] }
+tiny-skia = "0.12.0"
+zune-jpeg = "0.5.15"
+
+swfr-reader = { path = "crates/swfr-reader" }
+swfr-swf = { path = "crates/swfr-swf" }
+swfr-scene = { path = "crates/swfr-scene" }
+swfr-render = { path = "crates/swfr-render" }
+swfr-avm1 = { path = "crates/swfr-avm1" }
+swfr-avm2 = { path = "crates/swfr-avm2" }
+swfr-audio = { path = "crates/swfr-audio" }
+swfr-player = { path = "crates/swfr-player" }
+swfr-libretro = { path = "crates/swfr-libretro" }
+swfr-harness = { path = "crates/swfr-harness" }
+swfr-testkit = { path = "crates/swfr-testkit" }

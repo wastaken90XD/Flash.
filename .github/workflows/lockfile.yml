@@ -1,0 +1,42 @@
+name: lockfile
+
+on:
+  push:
+    branches:
+      - main
+      - "m[0-9]/**"
+      - "arena/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  generate-lockfile:
+    name: Generate Cargo.lock & Provisional Goldens
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Synchronize Cargo.lock, test-swfs, and formatting
+        run: |
+          cargo metadata --locked >/dev/null 2>&1 || cargo generate-lockfile
+          cargo run --release -p swfr-harness -- dump-test-swfs test-swfs
+          cargo fmt --all
+
+      - name: Commit and push if changed
+        run: |
+          git status --porcelain
+          if [ -n "$(git status --porcelain)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add Cargo.lock || true
+            git add test-swfs/*.swf || true
+            git add -u
+            git commit -m "chore(ci): synchronize Cargo.lock and test-swfs"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi

@@ -1,0 +1,281 @@
+diff --git a/platform/sdl/kdspaudio.cpp b/platform/sdl/kdspaudio.cpp
+index 140d1a8..ca2f435 100644
+--- a/platform/sdl/kdspaudio.cpp
++++ b/platform/sdl/kdspaudio.cpp
+@@ -22,6 +22,11 @@
+ #include <SDL.h>
+ #include <algorithm>
+ #include "../../source/kernel/devs/oss.h"
++#ifdef BOXEDWINE_LIBRETRO
++#include "boxedwine_hooks.hpp"
++#include "retro_host.hpp"
++#include "audio_adapter.hpp"
++#endif
+ 
+ #define DSP_BUFFER_SIZE (1024*32)
+ 
+@@ -220,6 +225,28 @@ public:
+ 	}
+ 
+ 	void queueDeviceAudio(const void* data, U32 bytes) {
++#ifdef BOXEDWINE_LIBRETRO
++		if (winebox::RetroHost* host = winebox::current_host()) {
++			winebox::PcmFormat format;
++			if (this->got.format == AUDIO_U8) {
++				format = winebox::PcmFormat::unsigned_8;
++			} else if (SDL_AUDIO_ISFLOAT(this->got.format) && SDL_AUDIO_BITSIZE(this->got.format) == 32) {
++				format = winebox::PcmFormat::float_32;
++			} else if (SDL_AUDIO_BITSIZE(this->got.format) == 16) {
++				format = winebox::PcmFormat::signed_16;
++			} else if (SDL_AUDIO_BITSIZE(this->got.format) == 32) {
++				format = winebox::PcmFormat::signed_32;
++			} else {
++				kwarn("Winebox dropped audio with an unsupported SDL sample format");
++				return;
++			}
++			auto pcm = winebox::convert_audio_chunk(data, bytes, format, this->got.freq, this->got.channels);
++			if (!pcm.empty() && !host->queue_audio(pcm.data(), pcm.size() / 2)) {
++				kwarn("Winebox audio queue reached its configured capacity");
++			}
++		}
++		return;
++#endif
+ #ifdef __EMSCRIPTEN__
+ 		if (this->webDevice) {
+ 			U32 frames = bytes / (sizeof(float) * this->got.channels);
+@@ -469,6 +496,13 @@ void KDspAudioSdl::openAudio(U32 format, U32 freq, U32 channels) {
+ 	this->want.freq = freq;
+ 	this->want.channels = channels;
+ 	this->openedFormat = format;
++#ifdef BOXEDWINE_LIBRETRO
++	this->closeDevice();
++	this->got = this->want;
++	this->sameFormat = true;
++	this->open = true;
++	return;
++#endif
+ 
+ 	if (!KSystem::soundEnabled) {
+ 		this->open = true;
+diff --git a/platform/sdl/knativescreenSDL.cpp b/platform/sdl/knativescreenSDL.cpp
+index 7a5582d..80d2f85 100644
+--- a/platform/sdl/knativescreenSDL.cpp
++++ b/platform/sdl/knativescreenSDL.cpp
+@@ -25,6 +25,10 @@
+ #include "knativeinputSDL.h"
+ #include "knativescreenSDL.h"
+ #include "knativesystem.h"
++#ifdef BOXEDWINE_LIBRETRO
++#include "boxedwine_hooks.hpp"
++#include "retro_host.hpp"
++#endif
+ #include "kopengl.h"
+ #include "../../source/x11/x11.h"
+ #if defined(BOXEDWINE_NATIVE_RUNTIME) && defined(__linux__)
+@@ -141,6 +145,9 @@ KNativeScreenSDL::KNativeScreenSDL(U32 cx, U32 cy, U32 bpp, int scaleX, int scal
+     this->defaultScreenWidth = cx;
+     this->defaultScreenHeight = cy;
+     this->defaultScreenBpp = bpp;
++#ifdef BOXEDWINE_LIBRETRO
++    libretroFrame.assign(static_cast<std::size_t>(cx) * cy, 0x003A6EA5);
++#endif
+ 
+     recreateMainWindow();
+ }
+@@ -161,6 +168,12 @@ void KNativeScreenSDL::setScreenSize(U32 cx, U32 cy) {
+         return;
+     }
+     input->setScreenSize(cx, cy);
++#ifdef BOXEDWINE_LIBRETRO
++    {
++        std::lock_guard<std::mutex> lock(libretroFrameMutex);
++        libretroFrame.assign(static_cast<std::size_t>(cx) * cy, 0x003A6EA5);
++    }
++#endif
+ #if defined(__EMSCRIPTEN__) && defined(BOXEDWINE_OPENGL_SDL)
+     boxedwineSetWebGLPresentSize(cx, cy);
+ #endif
+@@ -291,6 +304,12 @@ void KNativeScreenSDL::showWindow(bool show) {
+ }
+ 
+ void KNativeScreenSDL::clear() {
++#ifdef BOXEDWINE_LIBRETRO
++    {
++        std::lock_guard<std::mutex> lock(libretroFrameMutex);
++        std::fill(libretroFrame.begin(), libretroFrame.end(), 0x003A6EA5);
++    }
++#endif
+ #ifdef BOXEDWINE_RECORDER
+     if (Recorder::instance) {
+         BOXEDWINE_MUTEX_LOCK(drawingMutex);
+@@ -433,6 +452,29 @@ void KNativeScreenSDL::putBitsOnWnd(U32 id, U8* bits, U32 bitsPerPixel, U32 srcP
+     } else if (bitsPerPixel == 16 && wnd->bits) {
+         bits = wnd->bits;
+     }
++#ifdef BOXEDWINE_LIBRETRO
++    if (KSystem::videoOption == VIDEO_NO_WINDOW && bits &&
++        (bitsPerPixel == 8 || bitsPerPixel == 16 || bitsPerPixel == 32)) {
++        const S32 screenW = static_cast<S32>(screenWidth());
++        const S32 screenH = static_cast<S32>(screenHeight());
++        const S32 startX = std::max<S32>(0, -dstX);
++        const S32 startY = std::max<S32>(0, -dstY);
++        const S32 endX = std::min<S32>(static_cast<S32>(width), screenW - dstX);
++        const S32 endY = std::min<S32>(static_cast<S32>(height), screenH - dstY);
++        if (endX > startX && endY > startY) {
++            const U32 rowPitch = (bitsPerPixel == 32) ? originalSrcPitch : dstPitch;
++            std::lock_guard<std::mutex> lock(libretroFrameMutex);
++            for (S32 sy = startY; sy < endY; ++sy) {
++                const auto* srcRow = reinterpret_cast<const U32*>(bits + static_cast<std::size_t>(sy) * rowPitch);
++                const std::size_t dstOffset = static_cast<std::size_t>(dstY + sy) * screenW + (dstX + startX);
++                for (S32 sx = startX; sx < endX; ++sx) {
++                    libretroFrame[dstOffset + static_cast<std::size_t>(sx - startX)] = srcRow[sx] & 0x00FFFFFF;
++                }
++            }
++            lastUpdateTime = KSystem::getMilliesSinceStart();
++        }
++    }
++#endif
+ #ifdef BOXEDWINE_RECORDER
+     if ((Recorder::instance || Player::instance) && screenBpp() > 8) {
+         int wndWidth = width;
+@@ -542,6 +584,20 @@ void KNativeScreenSDL::putBitsOnWnd(U32 id, U8* bits, U32 bitsPerPixel, U32 srcP
+ }
+ 
+ void KNativeScreenSDL::present() {
++#ifdef BOXEDWINE_LIBRETRO
++    if (KSystem::videoOption == VIDEO_NO_WINDOW) {
++        if (winebox::RetroHost* host = winebox::current_host()) {
++            std::vector<U32> frame;
++            {
++                std::lock_guard<std::mutex> lock(libretroFrameMutex);
++                frame = libretroFrame;
++            }
++            host->publish_video(frame.data(), screenWidth(), screenHeight(), static_cast<std::size_t>(screenWidth()) * sizeof(U32));
++        }
++        presented = true;
++        return;
++    }
++#endif
+     const bool skipRenderer = skipHiddenRenderer(visible, showOnDraw);
+     if (KSystem::videoOption != VIDEO_NO_WINDOW && renderer && !skipRenderer) {
+         if (showOnDraw) {
+diff --git a/platform/sdl/knativescreenSDL.h b/platform/sdl/knativescreenSDL.h
+index 422b313..25832af 100644
+--- a/platform/sdl/knativescreenSDL.h
++++ b/platform/sdl/knativescreenSDL.h
+@@ -21,6 +21,9 @@
+ 
+ #include "knativescreen.h"
+ #include "knativeinputSDL.h"
++#ifdef BOXEDWINE_LIBRETRO
++#include <mutex>
++#endif
+ 
+ class WndCache {
+ public:
+@@ -138,6 +141,10 @@ private:
+     bool emscriptenSoftwareDirty = false;
+     bool emscriptenSoftwareDisabled = false;
+ #endif
++#ifdef BOXEDWINE_LIBRETRO
++    std::mutex libretroFrameMutex;
++    std::vector<U32> libretroFrame;
++#endif
+ 
+     void recreateMainWindow();
+     void destroyMainWindow();
+diff --git a/platform/sdl/knativesystem.cpp b/platform/sdl/knativesystem.cpp
+index 0934572..6f76407 100644
+--- a/platform/sdl/knativesystem.cpp
++++ b/platform/sdl/knativesystem.cpp
+@@ -147,6 +147,9 @@ void KNativeSystem::warpMouse(S32 x, S32 y) {
+ }
+ 
+ KOpenGLPtr KNativeSystem::getOpenGL() {
++#ifdef BOXEDWINE_LIBRETRO
++    return nullptr;
++#else
+     if (!opengl) {
+ #ifdef BOXEDWINE_OPENGL_OSMESA
+         if (KSystem::openglLib == "osmesa") {
+@@ -162,15 +165,20 @@ KOpenGLPtr KNativeSystem::getOpenGL() {
+ #endif
+     }
+     return opengl;
++#endif
+ }
+ 
+ KVulkanPtr KNativeSystem::getVulkan() {
++#ifdef BOXEDWINE_LIBRETRO
++    return nullptr;
++#else
+     if (!vulkan) {
+ #ifdef BOXEDWINE_VULKAN
+         vulkan = KVulkanSDL::create(screen);
+ #endif
+     }
+     return vulkan;
++#endif
+ }
+ 
+ void KNativeSystem::changeScreenSize(U32 cx, U32 cy) {
+@@ -234,7 +242,11 @@ void KNativeSystem::scheduledNewThread(KThread* thread) {
+ }
+ 
+ void KNativeSystem::exit(const char* msg, U32 code) {
++#ifdef BOXEDWINE_LIBRETRO
++    klog_fmt("BoxedWine exit (%u): %s", code, msg ? msg : "");
++#else
+     SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Error", msg, nullptr);
++#endif
+     _exit(code);
+ }
+ 
+@@ -266,11 +278,22 @@ void KNativeSystem::postQuit() {
+     SDL_PushEvent(&sdlevent);
+ }
+ 
++extern "C" void winebox_boxedwine_request_quit() {
++    KNativeSystem::postQuit();
++}
++
+ U32 KNativeSystem::getTicks() {
+     return SDL_GetTicks();
+ }
+ 
+ bool KNativeSystem::getScreenDimensions(U32* width, U32* height) {
++#ifdef BOXEDWINE_LIBRETRO
++    if (screen && width && height) {
++        *width = screen->screenWidth();
++        *height = screen->screenHeight();
++        return true;
++    }
++#endif
+     SDL_DisplayMode mode;
+     if (!SDL_GetCurrentDisplayMode(0, &mode)) {
+         *width = mode.w;
+diff --git a/source/sdl/startupArgs.cpp b/source/sdl/startupArgs.cpp
+index ef3473e..7b48c17 100644
+--- a/source/sdl/startupArgs.cpp
++++ b/source/sdl/startupArgs.cpp
+@@ -853,12 +853,14 @@ bool StartUpArgs::parseStartupArgs(int argc, const char **argv) {
+ #endif
+         } else if (!strcmp(argv[i], "-hideWindow")) {
+             this->videoOption = VIDEO_HIDE_WINDOW;
+-        } else if (!strcmp(argv[i], "-novideo")) {
+-#ifdef BOXEDWINE_MSVC
+-            this->videoOption = VIDEO_HIDE_WINDOW;
+-#else
+-            this->videoOption = VIDEO_NO_WINDOW;
+-#endif
++        } else if (!strcmp(argv[i], "-novideo")) {
++#ifdef BOXEDWINE_LIBRETRO
++            this->videoOption = VIDEO_NO_WINDOW;
++#elif defined(BOXEDWINE_MSVC)
++            this->videoOption = VIDEO_HIDE_WINDOW;
++#else
++            this->videoOption = VIDEO_NO_WINDOW;
++#endif
+         } else if (!strcmp(argv[i], "-env")) {
+ 			this->envValues.push_back(BString::copy(argv[i+1]));
+             i++;

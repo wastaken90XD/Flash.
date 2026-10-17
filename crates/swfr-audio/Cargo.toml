@@ -1,0 +1,17 @@
+[package]
+name = "swfr-audio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+swfr-reader.workspace = true
+swfr-swf.workspace = true
+symphonia.workspace = true
+
+[dev-dependencies]
+swfr-testkit.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,315 @@
+name: cross
+
+on:
+  push:
+    branches:
+      - main
+      - "m[0-9]/**"
+      - "arena/**"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  cross-linux:
+    name: cross-linux (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            pkg: ""
+            linker: ""
+            rustflags: ""
+            qemu: ""
+          - target: i686-unknown-linux-gnu
+            pkg: "gcc-multilib libc6-dev-i386"
+            linker: ""
+            rustflags: ""
+            qemu: ""
+          - target: armv7-unknown-linux-gnueabihf
+            pkg: "gcc-arm-linux-gnueabihf libc6-dev-armhf-cross qemu-user-static"
+            linker: "arm-linux-gnueabihf-gcc"
+            rustflags: "-C target-feature=-neon"
+            qemu: "qemu-arm-static -L /usr/arm-linux-gnueabihf"
+          - target: aarch64-unknown-linux-gnu
+            pkg: "gcc-aarch64-linux-gnu libc6-dev-arm64-cross"
+            linker: "aarch64-linux-gnu-gcc"
+            rustflags: ""
+            qemu: ""
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Install cross-compilation packages
+        run: |
+          if [ -n "${{ matrix.pkg }}" ]; then
+            sudo apt-get update
+            sudo apt-get install -y ${{ matrix.pkg }}
+          fi
+          rustup target add "${{ matrix.target }}"
+
+      - name: Build release core, verify m0-stub off & 25 retro_* symbols, and run QEMU ABI test if configured
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }}
+        run: |
+          cargo metadata --locked >/dev/null 2>&1 || cargo generate-lockfile
+          if cargo tree -p swfr-libretro --target "${{ matrix.target }}" -e features | grep -q "m0-stub"; then
+            echo "::error::m0-stub feature is enabled in shipped build for ${{ matrix.target }}"
+            exit 1
+          fi
+          UPPER_TARGET=$(echo "${{ matrix.target }}" | tr 'a-z-' 'A-Z_')
+          if [ -n "${{ matrix.linker }}" ]; then
+            export "CARGO_TARGET_${UPPER_TARGET}_LINKER=${{ matrix.linker }}"
+          fi
+          cargo build --release -p swfr-libretro --target "${{ matrix.target }}"
+
+          SO_PATH="target/${{ matrix.target }}/release/libswfr_libretro.so"
+          llvm_or_nm="nm"
+          SYM_COUNT=$(${llvm_or_nm} -D --defined-only "${SO_PATH}" | grep -cE ' T retro_')
+          echo "Target ${{ matrix.target }} exported retro_* symbols: ${SYM_COUNT}"
+          ${llvm_or_nm} -D --defined-only "${SO_PATH}" | grep -E ' T retro_'
+          if [ "${SYM_COUNT}" -lt 25 ]; then
+            echo "::error::Expected 25 retro_* symbols in ${SO_PATH}, found ${SYM_COUNT}"
+            exit 1
+          fi
+
+          # Run ABI and E2E tests under QEMU user-mode for armv7-unknown-linux-gnueabihf (TSD 3.6 M6, 3.14)
+          if [ -n "${{ matrix.qemu }}" ]; then
+            export "CARGO_TARGET_${UPPER_TARGET}_RUNNER=${{ matrix.qemu }}"
+            cargo test -p swfr-libretro --target "${{ matrix.target }}" --test header_check
+            cargo test -p swfr-libretro --target "${{ matrix.target }}" --test abi -- --test-threads=1
+            cargo test -p swfr-libretro --target "${{ matrix.target }}" --test e2e -- --test-threads=1
+          fi
+
+          mkdir -p dist
+          cp "${SO_PATH}" dist/swfr_libretro.so
+          cp swfr_libretro.info README.md LICENSE-MIT LICENSE-APACHE THIRD_PARTY_LICENSES.md dist/
+          cargo run --release -p swfr-harness -- dump-test-swfs dist/test-swfs
+          (cd dist && zip -r "../swfr-libretro-${{ matrix.target }}.zip" .)
+
+      - name: Upload Linux core artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: swfr-libretro-${{ matrix.target }}
+          path: swfr-libretro-${{ matrix.target }}.zip
+
+      - name: Upload standalone test-swfs artifact
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: test-swfs
+          path: dist/test-swfs/*.swf
+
+  cross-android:
+    name: cross-android (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: armv7-linux-androideabi
+            clang_prefix: armv7a-linux-androideabi21-clang
+            rustflags: "-C target-feature=-neon"
+          - target: thumbv7neon-linux-androideabi
+            clang_prefix: armv7a-linux-androideabi21-clang
+            rustflags: ""
+          - target: aarch64-linux-android
+            clang_prefix: aarch64-linux-android21-clang
+            rustflags: ""
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Build Android API 21 core and verify 25 exported retro_* symbols
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }}
+        run: |
+          rustup target add "${{ matrix.target }}"
+          cargo metadata --locked >/dev/null 2>&1 || cargo generate-lockfile
+          if cargo tree -p swfr-libretro --target "${{ matrix.target }}" -e features | grep -q "m0-stub"; then
+            echo "::error::m0-stub feature is enabled in shipped build for ${{ matrix.target }}"
+            exit 1
+          fi
+          NDK_BIN="${ANDROID_NDK_LATEST_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          UPPER_TARGET=$(echo "${{ matrix.target }}" | tr 'a-z-' 'A-Z_')
+          export "CARGO_TARGET_${UPPER_TARGET}_LINKER=${NDK_BIN}/${{ matrix.clang_prefix }}"
+
+          cargo build --release -p swfr-libretro --target "${{ matrix.target }}"
+          SO_PATH="target/${{ matrix.target }}/release/libswfr_libretro.so"
+          "${NDK_BIN}/llvm-nm" -D --defined-only "${SO_PATH}" | grep -E ' T retro_'
+          SYM_COUNT=$("${NDK_BIN}/llvm-nm" -D --defined-only "${SO_PATH}" | grep -cE ' T retro_')
+          if [ "${SYM_COUNT}" -lt 25 ]; then
+            echo "::error::Expected 25 retro_* symbols in ${SO_PATH}, found ${SYM_COUNT}"
+            exit 1
+          fi
+
+          mkdir -p dist
+          cp "${SO_PATH}" dist/swfr_libretro.so
+          cp swfr_libretro.info README.md LICENSE-MIT LICENSE-APACHE THIRD_PARTY_LICENSES.md dist/
+          cargo run --release -p swfr-harness -- dump-test-swfs dist/test-swfs
+          (cd dist && zip -r "../swfr-libretro-${{ matrix.target }}.zip" .)
+
+      - name: Upload Android core artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: swfr-libretro-${{ matrix.target }}
+          path: swfr-libretro-${{ matrix.target }}.zip
+
+  cross-windows-gnu:
+    name: cross-windows-gnu (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-pc-windows-gnu
+            pkg: "gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64"
+            objdump: "x86_64-w64-mingw32-objdump"
+          - target: i686-pc-windows-gnu
+            pkg: "gcc-mingw-w64-i686 binutils-mingw-w64-i686"
+            objdump: "i686-w64-mingw32-objdump"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Build Windows MinGW core and verify 25 exported retro_* symbols
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ matrix.pkg }}
+          rustup target add "${{ matrix.target }}"
+          cargo metadata --locked >/dev/null 2>&1 || cargo generate-lockfile
+          if cargo tree -p swfr-libretro --target "${{ matrix.target }}" -e features | grep -q "m0-stub"; then
+            echo "::error::m0-stub feature is enabled in shipped build for ${{ matrix.target }}"
+            exit 1
+          fi
+          cargo build --release -p swfr-libretro --target "${{ matrix.target }}"
+
+          DLL_PATH="target/${{ matrix.target }}/release/swfr_libretro.dll"
+          ${{ matrix.objdump }} -p "${DLL_PATH}" | grep -E '\bretro_'
+          SYM_COUNT=$(${{ matrix.objdump }} -p "${DLL_PATH}" | grep -cE '\bretro_')
+          if [ "${SYM_COUNT}" -lt 25 ]; then
+            echo "::error::Expected 25 retro_* symbols in ${DLL_PATH}, found ${SYM_COUNT}"
+            exit 1
+          fi
+
+          mkdir -p dist
+          cp "${DLL_PATH}" dist/swfr_libretro.dll
+          cp swfr_libretro.info README.md LICENSE-MIT LICENSE-APACHE THIRD_PARTY_LICENSES.md dist/
+          cargo run --release -p swfr-harness -- dump-test-swfs dist/test-swfs
+          (cd dist && zip -r "../swfr-libretro-${{ matrix.target }}.zip" .)
+
+      - name: Upload Windows GNU core artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: swfr-libretro-${{ matrix.target }}
+          path: swfr-libretro-${{ matrix.target }}.zip
+
+  cross-windows-msvc:
+    name: cross-windows-msvc (${{ matrix.target }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [x86_64-pc-windows-msvc, i686-pc-windows-msvc]
+    steps:
+      - name: Clone into C:/swfr, build Windows MSVC core, and verify 25 exported retro_* symbols
+        shell: bash
+        run: |
+          rm -rf /c/swfr
+          git clone --no-checkout "https://github.com/${GITHUB_REPOSITORY}.git" /c/swfr
+          cd /c/swfr
+          git fetch origin "${GITHUB_SHA}"
+          git checkout --force "${GITHUB_SHA}"
+          rustup target add "${{ matrix.target }}"
+          cargo metadata --locked >/dev/null 2>&1 || cargo generate-lockfile
+          if cargo tree -p swfr-libretro --target "${{ matrix.target }}" -e features | grep -q "m0-stub"; then
+            echo "::error::m0-stub feature is enabled in shipped build for ${{ matrix.target }}"
+            exit 1
+          fi
+          cargo build --release -p swfr-libretro --target "${{ matrix.target }}"
+
+          DLL_PATH="target/${{ matrix.target }}/release/swfr_libretro.dll"
+          objdump -p "${DLL_PATH}" | grep -E '\bretro_'
+          SYM_COUNT=$(objdump -p "${DLL_PATH}" | grep -cE '\bretro_')
+          if [ "${SYM_COUNT}" -lt 25 ]; then
+            echo "::error::Expected 25 retro_* symbols in ${DLL_PATH}, found ${SYM_COUNT}"
+            exit 1
+          fi
+
+          mkdir -p dist
+          cp "${DLL_PATH}" dist/swfr_libretro.dll
+          cp swfr_libretro.info README.md LICENSE-MIT LICENSE-APACHE THIRD_PARTY_LICENSES.md dist/
+          cargo run --release -p swfr-harness -- dump-test-swfs dist/test-swfs
+          7z a -tzip "${RUNNER_TEMP}/swfr-libretro-${{ matrix.target }}.zip" ./dist/*
+
+      - name: Upload Windows MSVC core artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: swfr-libretro-${{ matrix.target }}
+          path: ${{ runner.temp }}/swfr-libretro-${{ matrix.target }}.zip
+
+  cross-apple:
+    name: cross-apple (${{ matrix.target }})
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            kind: dylib
+          - target: x86_64-apple-darwin
+            kind: dylib
+          - target: aarch64-apple-ios
+            kind: staticlib
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Build Apple core and verify 25 exported retro_* symbols
+        run: |
+          rustup target add "${{ matrix.target }}"
+          cargo metadata --locked >/dev/null 2>&1 || cargo generate-lockfile
+          if cargo tree -p swfr-libretro --target "${{ matrix.target }}" -e features | grep -q "m0-stub"; then
+            echo "::error::m0-stub feature is enabled in shipped build for ${{ matrix.target }}"
+            exit 1
+          fi
+          mkdir -p dist
+          if [ "${{ matrix.kind }}" = "dylib" ]; then
+            cargo build --release -p swfr-libretro --target "${{ matrix.target }}"
+            DYLIB_PATH="target/${{ matrix.target }}/release/libswfr_libretro.dylib"
+            nm -gU "${DYLIB_PATH}" | grep -E ' T _retro_'
+            SYM_COUNT=$(nm -gU "${DYLIB_PATH}" | grep -cE ' T _retro_')
+            if [ "${SYM_COUNT}" -lt 25 ]; then
+              echo "::error::Expected 25 _retro_* symbols in ${DYLIB_PATH}, found ${SYM_COUNT}"
+              exit 1
+            fi
+            cp "${DYLIB_PATH}" dist/swfr_libretro.dylib
+          else
+            cargo rustc --release -p swfr-libretro --target "${{ matrix.target }}" --lib --crate-type staticlib
+            STATIC_PATH="target/${{ matrix.target }}/release/libswfr_libretro.a"
+            nm -gU "${STATIC_PATH}" | grep -E ' T _retro_'
+            SYM_COUNT=$(nm -gU "${STATIC_PATH}" | grep -cE ' T _retro_')
+            if [ "${SYM_COUNT}" -lt 25 ]; then
+              echo "::error::Expected 25 _retro_* symbols in ${STATIC_PATH}, found ${SYM_COUNT}"
+              exit 1
+            fi
+            cp "${STATIC_PATH}" dist/swfr_libretro_ios.a
+          fi
+          cp swfr_libretro.info README.md LICENSE-MIT LICENSE-APACHE THIRD_PARTY_LICENSES.md dist/
+          cargo run --release -p swfr-harness -- dump-test-swfs dist/test-swfs
+          (cd dist && zip -r "../swfr-libretro-${{ matrix.target }}.zip" .)
+
+      - name: Upload Apple core artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: swfr-libretro-${{ matrix.target }}
+          path: swfr-libretro-${{ matrix.target }}.zip

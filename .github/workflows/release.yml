@@ -1,0 +1,204 @@
+name: release
+
+on:
+  push:
+    branches:
+      - main
+      - "arena/**"
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  package-linux-android-mingw:
+    name: package (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            kind: linux
+            pkg: ""
+            linker: ""
+            rustflags: ""
+          - target: i686-unknown-linux-gnu
+            kind: linux
+            pkg: "gcc-multilib libc6-dev-i386"
+            linker: ""
+            rustflags: ""
+          - target: armv7-unknown-linux-gnueabihf
+            kind: linux
+            pkg: "gcc-arm-linux-gnueabihf libc6-dev-armhf-cross"
+            linker: "arm-linux-gnueabihf-gcc"
+            rustflags: "-C target-feature=-neon"
+          - target: aarch64-unknown-linux-gnu
+            kind: linux
+            pkg: "gcc-aarch64-linux-gnu libc6-dev-arm64-cross"
+            linker: "aarch64-linux-gnu-gcc"
+            rustflags: ""
+          - target: armv7-linux-androideabi
+            kind: android
+            pkg: ""
+            linker: "armv7a-linux-androideabi21-clang"
+            rustflags: "-C target-feature=-neon"
+          - target: thumbv7neon-linux-androideabi
+            kind: android
+            pkg: ""
+            linker: "armv7a-linux-androideabi21-clang"
+            rustflags: ""
+          - target: aarch64-linux-android
+            kind: android
+            pkg: ""
+            linker: "aarch64-linux-android21-clang"
+            rustflags: ""
+          - target: x86_64-pc-windows-gnu
+            kind: mingw
+            pkg: "gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64"
+            linker: ""
+            rustflags: ""
+          - target: i686-pc-windows-gnu
+            kind: mingw
+            pkg: "gcc-mingw-w64-i686 binutils-mingw-w64-i686"
+            linker: ""
+            rustflags: ""
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Build and package release zip
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }}
+        run: |
+          if [ -n "${{ matrix.pkg }}" ]; then
+            sudo apt-get update
+            sudo apt-get install -y ${{ matrix.pkg }}
+          fi
+          rustup target add "${{ matrix.target }}"
+          cargo metadata --locked >/dev/null 2>&1 || cargo generate-lockfile
+          if cargo tree -p swfr-libretro --target "${{ matrix.target }}" -e features | grep -q "m0-stub"; then
+            echo "::error::m0-stub feature is enabled in shipped release build for ${{ matrix.target }}"
+            exit 1
+          fi
+          for req in swfr-swf swfr-scene swfr-render swfr-avm1 swfr-audio; do
+            if ! cargo tree -p swfr-libretro --target "${{ matrix.target }}" | grep -q "${req}"; then
+              echo "::error::swfr-libretro missing ${req} in release build for ${{ matrix.target }}"
+              exit 1
+            fi
+          done
+          UPPER_TARGET=$(echo "${{ matrix.target }}" | tr 'a-z-' 'A-Z_')
+
+          if [ "${{ matrix.kind }}" = "android" ]; then
+            NDK_BIN="${ANDROID_NDK_LATEST_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+            export "CARGO_TARGET_${UPPER_TARGET}_LINKER=${NDK_BIN}/${{ matrix.linker }}"
+          elif [ -n "${{ matrix.linker }}" ]; then
+            export "CARGO_TARGET_${UPPER_TARGET}_LINKER=${{ matrix.linker }}"
+          fi
+
+          cargo build --release -p swfr-libretro --target "${{ matrix.target }}"
+          mkdir -p dist
+          if [ "${{ matrix.kind }}" = "mingw" ]; then
+            cp "target/${{ matrix.target }}/release/swfr_libretro.dll" dist/swfr_libretro.dll
+          else
+            cp "target/${{ matrix.target }}/release/libswfr_libretro.so" dist/swfr_libretro.so
+          fi
+          cp swfr_libretro.info README.md LICENSE-MIT LICENSE-APACHE THIRD_PARTY_LICENSES.md dist/
+          cargo run --release -p swfr-harness -- dump-test-swfs dist/test-swfs
+          (cd dist && zip -r "../swfr-libretro-${{ matrix.target }}.zip" .)
+
+      - name: Upload release zip artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: release-${{ matrix.target }}
+          path: swfr-libretro-${{ matrix.target }}.zip
+
+      - name: Upload standalone test-swfs artifact
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: test-swfs
+          path: dist/test-swfs/*.swf
+
+  package-windows-msvc:
+    name: package (${{ matrix.target }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [x86_64-pc-windows-msvc, i686-pc-windows-msvc]
+    steps:
+      - name: Clone into C:/swfr, build, and package Windows MSVC zip
+        shell: bash
+        run: |
+          rm -rf /c/swfr
+          git clone --no-checkout "https://github.com/${GITHUB_REPOSITORY}.git" /c/swfr
+          cd /c/swfr
+          git fetch origin "${GITHUB_SHA}"
+          git checkout --force "${GITHUB_SHA}"
+          rustup target add "${{ matrix.target }}"
+          cargo metadata --locked >/dev/null 2>&1 || cargo generate-lockfile
+          if cargo tree -p swfr-libretro --target "${{ matrix.target }}" -e features | grep -q "m0-stub"; then
+            echo "::error::m0-stub feature is enabled in shipped release build for ${{ matrix.target }}"
+            exit 1
+          fi
+          cargo build --release -p swfr-libretro --target "${{ matrix.target }}"
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/swfr_libretro.dll" dist/swfr_libretro.dll
+          cp swfr_libretro.info README.md LICENSE-MIT LICENSE-APACHE THIRD_PARTY_LICENSES.md dist/
+          cargo run --release -p swfr-harness -- dump-test-swfs dist/test-swfs
+          7z a -tzip "${RUNNER_TEMP}/swfr-libretro-${{ matrix.target }}.zip" ./dist/*
+
+      - name: Upload Windows MSVC release zip
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: release-${{ matrix.target }}
+          path: ${{ runner.temp }}/swfr-libretro-${{ matrix.target }}.zip
+
+  package-apple:
+    name: package (${{ matrix.target }})
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            kind: dylib
+          - target: x86_64-apple-darwin
+            kind: dylib
+          - target: aarch64-apple-ios
+            kind: staticlib
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Build and package Apple release zip
+        run: |
+          rustup target add "${{ matrix.target }}"
+          cargo metadata --locked >/dev/null 2>&1 || cargo generate-lockfile
+          if cargo tree -p swfr-libretro --target "${{ matrix.target }}" -e features | grep -q "m0-stub"; then
+            echo "::error::m0-stub feature is enabled in shipped release build for ${{ matrix.target }}"
+            exit 1
+          fi
+          mkdir -p dist
+          if [ "${{ matrix.kind }}" = "dylib" ]; then
+            cargo build --release -p swfr-libretro --target "${{ matrix.target }}"
+            cp "target/${{ matrix.target }}/release/libswfr_libretro.dylib" dist/swfr_libretro.dylib
+          else
+            cargo rustc --release -p swfr-libretro --target "${{ matrix.target }}" --lib --crate-type staticlib
+            cp "target/${{ matrix.target }}/release/libswfr_libretro.a" dist/swfr_libretro_ios.a
+          fi
+          cp swfr_libretro.info README.md LICENSE-MIT LICENSE-APACHE THIRD_PARTY_LICENSES.md dist/
+          cargo run --release -p swfr-harness -- dump-test-swfs dist/test-swfs
+          (cd dist && zip -r "../swfr-libretro-${{ matrix.target }}.zip" .)
+
+      - name: Upload Apple release zip
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: release-${{ matrix.target }}
+          path: swfr-libretro-${{ matrix.target }}.zip

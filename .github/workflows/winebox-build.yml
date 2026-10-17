@@ -1,0 +1,184 @@
+name: winebox-windows-builds
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'winebox/**'
+      - 'docs/winebox/**'
+      - '.github/workflows/winebox-build.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  windows-x64:
+    runs-on: windows-2025
+    steps:
+      - name: Clone this repository to a Windows-safe path
+        shell: bash
+        working-directory: C:/
+        run: |
+          rm -rf /c/flash
+          git clone --no-checkout "https://github.com/${GITHUB_REPOSITORY}.git" /c/flash
+          cd /c/flash
+          git fetch origin "${GITHUB_SHA}"
+          git checkout --force "${GITHUB_SHA}"
+      - name: Configure Winebox bridge tests
+        working-directory: C:/flash
+        run: cmake -S winebox/bridge -B build/winebox-bridge -A x64
+      - name: Build and test Winebox bridge
+        working-directory: C:/flash
+        run: |
+          cmake --build build/winebox-bridge --config Debug
+          ctest --test-dir build/winebox-bridge -C Debug --output-on-failure
+      - name: Checkout BoxedWine pinned snapshot
+        shell: bash
+        working-directory: C:/flash
+        run: |
+          mkdir -p boxedwine
+          cd boxedwine
+          git init
+          git remote add origin https://github.com/danoon2/Boxedwine.git
+          git fetch --depth 1 origin 6c70c03c6a611a0993ccc922a4f10e658af02f49
+          git checkout --detach FETCH_HEAD
+      - name: Apply Winebox SDL platform patch
+        shell: pwsh
+        working-directory: C:/flash
+        run: |
+          git -C boxedwine apply --check ../winebox/patches/boxedwine-libretro-hooks.patch
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git -C boxedwine apply ../winebox/patches/boxedwine-libretro-hooks.patch
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Compile libretro core objects against pinned SDL2
+        working-directory: C:/flash
+        run: |
+          cmake -S winebox/core -B build/winebox-core -A x64 -DWINEBOX_SDL2_INCLUDE_DIR=boxedwine/lib/sdl2/include
+          cmake --build build/winebox-core --config Release --parallel
+      - name: Best-effort build pinned BoxedWine dependencies (Windows x64)
+        continue-on-error: true
+        shell: pwsh
+        working-directory: C:/flash
+        run: |
+          $solution = "boxedwine/project/msvc/BoxedWine/BoxedWine.sln"
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
+          if (-not (Test-Path $vswhere)) { throw "vswhere.exe not found at $vswhere" }
+          $vsInstall = & $vswhere -latest -products "*" -property installationPath
+          if (-not $vsInstall) { throw "No Visual Studio installation was found by vswhere." }
+          $msbuildExe = Join-Path $vsInstall "MSBuild/Current/Bin/MSBuild.exe"
+          if (-not (Test-Path $msbuildExe)) { throw "MSBuild.exe not found at $msbuildExe" }
+          $buildLog = Join-Path (Resolve-Path "build").Path "boxedwine-msbuild.log"
+          $buildOutput = & $msbuildExe $solution /m /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 /verbosity:minimal 2>&1
+          $buildExitCode = $LASTEXITCODE
+          $buildOutput | Out-File -FilePath $buildLog -Encoding utf8
+          if ($buildExitCode -ne 0) {
+            $diagnostics = $buildOutput | Select-String -Pattern "error|MSB[0-9]+|fatal" | Select-Object -Last 30
+            if (-not $diagnostics) { $diagnostics = $buildOutput | Select-Object -Last 60 }
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "## BoxedWine MSBuild diagnostics"
+            foreach ($line in $diagnostics) {
+              $message = $line.ToString()
+              Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- ``$message``"
+              Write-Output "::error file=.github/workflows/winebox-build.yml,line=63,title=BoxedWine build diagnostic::$message"
+            }
+            exit $buildExitCode
+          }
+      - name: Add the Winebox MSBuild source target
+        shell: pwsh
+        working-directory: C:/flash
+        run: |
+          $project = "boxedwine/project/msvc/BoxedWine/BoxedWine/BoxedWine.vcxproj"
+          $source = [System.IO.File]::ReadAllText((Resolve-Path $project).Path)
+          if ($source -notmatch "WineboxLibretroTargets") {
+            $marker = "</Project>"
+            $index = $source.LastIndexOf($marker, [System.StringComparison]::Ordinal)
+            if ($index -lt 0) { throw "Could not locate closing Project tag in BoxedWine.vcxproj" }
+            $importLine = '  <Import Project="$(WineboxLibretroTargets)" Condition="Exists(''$(WineboxLibretroTargets)'')" />'
+            $source = $source.Substring(0, $index) + $importLine + [Environment]::NewLine + $source.Substring($index)
+            [System.IO.File]::WriteAllText((Resolve-Path $project).Path, $source, [System.Text.UTF8Encoding]::new($false))
+          }
+      - name: Build BoxedWine libretro core DLL (Windows x64)
+        id: core-build
+        shell: pwsh
+        working-directory: C:/flash
+        run: |
+          $project = "boxedwine/project/msvc/BoxedWine/BoxedWine/BoxedWine.vcxproj"
+          $targets = (Resolve-Path "winebox/core/BoxedWineLibretro.targets").Path
+          New-Item -ItemType Directory -Force -Path boxedwine-output, build/winebox-libretro-obj | Out-Null
+          $outDir = (Resolve-Path "boxedwine-output").Path.TrimEnd('\') + '\'
+          $intDir = (Resolve-Path "build/winebox-libretro-obj").Path.TrimEnd('\') + '\'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
+          if (-not (Test-Path $vswhere)) { throw "vswhere.exe not found at $vswhere" }
+          $vsInstall = & $vswhere -latest -products "*" -property installationPath
+          if (-not $vsInstall) { throw "No Visual Studio installation was found by vswhere." }
+          $msbuildExe = Join-Path $vsInstall "MSBuild/Current/Bin/MSBuild.exe"
+          if (-not (Test-Path $msbuildExe)) { throw "MSBuild.exe not found at $msbuildExe" }
+          $msbuildArgs = @(
+            $project,
+            "/m",
+            "/p:Configuration=Release",
+            "/p:Platform=x64",
+            "/p:PlatformToolset=v143",
+            "/p:ConfigurationType=DynamicLibrary",
+            "/p:TargetName=winebox_libretro",
+            "/p:WineboxLibretroTargets=$targets",
+            "/p:OutDir=$outDir",
+            "/p:IntDir=$intDir",
+            "/verbosity:minimal"
+          )
+          $buildOutput = & $msbuildExe @msbuildArgs 2>&1
+          $buildExitCode = $LASTEXITCODE
+          $buildOutput | Out-File -FilePath (Join-Path (Resolve-Path "build").Path "winebox-libretro-msbuild.log") -Encoding utf8
+          if ($buildExitCode -ne 0) {
+            $diagnostics = $buildOutput | Select-String -Pattern "error|MSB[0-9]+|fatal" | Select-Object -Last 30
+            if (-not $diagnostics) { $diagnostics = $buildOutput | Select-Object -Last 60 }
+            $diagnosticText = (($diagnostics | ForEach-Object { $_.ToString() }) -join " | ") -replace "[\r\n]+", " "
+            if (-not $diagnosticText) { $diagnosticText = "MSBuild exited $buildExitCode without console diagnostics; see the saved log." }
+            if ($diagnosticText.Length -gt 600) { $diagnosticText = $diagnosticText.Substring(0, 600) }
+            Add-Content -Path $env:GITHUB_OUTPUT -Value "failed=true"
+            Add-Content -Path $env:GITHUB_OUTPUT -Value "diagnostic=$diagnosticText"
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "## Winebox core MSBuild diagnostics"
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $diagnosticText
+            Write-Output "::error file=.github/workflows/winebox-build.yml,line=100,title=Winebox core build diagnostic::$diagnosticText"
+            exit 0
+          }
+          $dll = Join-Path (Resolve-Path boxedwine-output).Path "winebox_libretro.dll"
+          if (-not (Test-Path $dll)) { throw "MSBuild succeeded but did not produce winebox_libretro.dll" }
+      - name: "Fail on libretro DLL build errors: ${{ steps.core-build.outputs.diagnostic }}"
+        if: steps.core-build.outputs.failed == 'true'
+        shell: pwsh
+        working-directory: C:/flash
+        run: exit 1
+      - name: Verify required libretro exports
+        shell: pwsh
+        working-directory: C:/flash
+        run: |
+          $dll = (Resolve-Path "boxedwine-output/winebox_libretro.dll").Path
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
+          $vsInstall = & $vswhere -latest -products "*" -property installationPath
+          $vcToolsRoot = Join-Path $vsInstall "VC/Tools/MSVC"
+          $vcTools = Get-ChildItem $vcToolsRoot -Directory | Sort-Object Name -Descending | Select-Object -First 1
+          if (-not $vcTools) { throw "MSVC tool directory not found under $vcToolsRoot" }
+          $dumpbin = Join-Path $vcTools.FullName "bin/Hostx64/x64/dumpbin.exe"
+          if (-not (Test-Path $dumpbin)) { throw "dumpbin.exe not found at $dumpbin" }
+          $exports = & $dumpbin /nologo /exports $dll
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $required = @(
+            "retro_api_version", "retro_set_environment", "retro_set_video_refresh",
+            "retro_set_audio_sample", "retro_set_audio_sample_batch", "retro_set_input_poll",
+            "retro_set_input_state", "retro_init", "retro_deinit", "retro_get_system_info",
+            "retro_get_system_av_info", "retro_load_game", "retro_unload_game", "retro_run"
+          )
+          foreach ($symbol in $required) {
+            if (-not ($exports | Select-String -SimpleMatch $symbol)) {
+              throw "Required libretro export missing from DLL: $symbol"
+            }
+          }
+      - name: Upload Windows x64 core
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: winebox-libretro-windows-x64-6c70c03
+          path: |
+            C:/flash/boxedwine-output/winebox_libretro.dll
+            C:/flash/winebox/winebox_libretro.info
+          if-no-files-found: error
+          retention-days: 7

@@ -1,0 +1,22 @@
+[package]
+name = "swfr-render"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+fontdue.workspace = true
+png.workspace = true
+swfr-reader.workspace = true
+swfr-scene.workspace = true
+swfr-swf.workspace = true
+tiny-skia.workspace = true
+zune-jpeg.workspace = true
+
+[dev-dependencies]
+miniz_oxide.workspace = true
+swfr-testkit.workspace = true
+
+[lints]
+workspace = true
