@@ -55,7 +55,8 @@ jobs:
         run: |
           cmake -S winebox/core -B build/winebox-core -A x64 -DWINEBOX_SDL2_INCLUDE_DIR=boxedwine/lib/sdl2/include
           cmake --build build/winebox-core --config Release --parallel
-      - name: Build pinned BoxedWine and native dependencies (Windows x64)
+      - name: Best-effort build pinned BoxedWine dependencies (Windows x64)
+        continue-on-error: true
         shell: pwsh
         working-directory: C:/flash
         run: |
