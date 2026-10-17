@@ -61,8 +61,14 @@ jobs:
         working-directory: C:/flash
         run: |
           $solution = "boxedwine/project/msvc/BoxedWine/BoxedWine.sln"
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
+          if (-not (Test-Path $vswhere)) { throw "vswhere.exe not found at $vswhere" }
+          $vsInstall = & $vswhere -latest -products "*" -property installationPath
+          if (-not $vsInstall) { throw "No Visual Studio installation was found by vswhere." }
+          $msbuildExe = Join-Path $vsInstall "MSBuild/Current/Bin/MSBuild.exe"
+          if (-not (Test-Path $msbuildExe)) { throw "MSBuild.exe not found at $msbuildExe" }
           $buildLog = Join-Path (Resolve-Path "build").Path "boxedwine-msbuild.log"
-          $buildOutput = & msbuild $solution /m /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 /verbosity:minimal 2>&1
+          $buildOutput = & $msbuildExe $solution /m /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 /verbosity:minimal 2>&1
           $buildExitCode = $LASTEXITCODE
           $buildOutput | Out-File -FilePath $buildLog -Encoding utf8
           if ($buildExitCode -ne 0) {
@@ -100,6 +106,12 @@ jobs:
           New-Item -ItemType Directory -Force -Path boxedwine-output, build/winebox-libretro-obj | Out-Null
           $outDir = (Resolve-Path "boxedwine-output").Path.TrimEnd('\') + '\'
           $intDir = (Resolve-Path "build/winebox-libretro-obj").Path.TrimEnd('\') + '\'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
+          if (-not (Test-Path $vswhere)) { throw "vswhere.exe not found at $vswhere" }
+          $vsInstall = & $vswhere -latest -products "*" -property installationPath
+          if (-not $vsInstall) { throw "No Visual Studio installation was found by vswhere." }
+          $msbuildExe = Join-Path $vsInstall "MSBuild/Current/Bin/MSBuild.exe"
+          if (-not (Test-Path $msbuildExe)) { throw "MSBuild.exe not found at $msbuildExe" }
           $msbuildArgs = @(
             $project,
             "/m",
@@ -113,7 +125,7 @@ jobs:
             "/p:IntDir=$intDir",
             "/verbosity:minimal"
           )
-          $buildOutput = & msbuild @msbuildArgs 2>&1
+          $buildOutput = & $msbuildExe @msbuildArgs 2>&1
           $buildExitCode = $LASTEXITCODE
           $buildOutput | Out-File -FilePath (Join-Path (Resolve-Path "build").Path "winebox-libretro-msbuild.log") -Encoding utf8
           if ($buildExitCode -ne 0) {
@@ -122,8 +134,8 @@ jobs:
             $diagnosticText = (($diagnostics | ForEach-Object { $_.ToString() }) -join " | ") -replace "[\r\n]+", " "
             if (-not $diagnosticText) { $diagnosticText = "MSBuild exited $buildExitCode without console diagnostics; see the saved log." }
             if ($diagnosticText.Length -gt 600) { $diagnosticText = $diagnosticText.Substring(0, 600) }
-            "failed=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-            "diagnostic=$diagnosticText" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            Add-Content -Path $env:GITHUB_OUTPUT -Value "failed=true"
+            Add-Content -Path $env:GITHUB_OUTPUT -Value "diagnostic=$diagnosticText"
             Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "## Winebox core MSBuild diagnostics"
             Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $diagnosticText
             Write-Output "::error file=.github/workflows/winebox-build.yml,line=100,title=Winebox core build diagnostic::$diagnosticText"
@@ -141,7 +153,14 @@ jobs:
         working-directory: C:/flash
         run: |
           $dll = (Resolve-Path "boxedwine-output/winebox_libretro.dll").Path
-          $exports = & dumpbin /nologo /exports $dll
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
+          $vsInstall = & $vswhere -latest -products "*" -property installationPath
+          $vcToolsRoot = Join-Path $vsInstall "VC/Tools/MSVC"
+          $vcTools = Get-ChildItem $vcToolsRoot -Directory | Sort-Object Name -Descending | Select-Object -First 1
+          if (-not $vcTools) { throw "MSVC tool directory not found under $vcToolsRoot" }
+          $dumpbin = Join-Path $vcTools.FullName "bin/Hostx64/x64/dumpbin.exe"
+          if (-not (Test-Path $dumpbin)) { throw "dumpbin.exe not found at $dumpbin" }
+          $exports = & $dumpbin /nologo /exports $dll
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $required = @(
             "retro_api_version", "retro_set_environment", "retro_set_video_refresh",
