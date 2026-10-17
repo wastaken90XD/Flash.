@@ -318,10 +318,17 @@ RETRO_API void RETRO_CALLCONV retro_run(void) {
         const double average_present_ms = g_video_stats_present_calls
             ? g_video_stats_present_milliseconds / static_cast<double>(g_video_stats_present_calls)
             : 0.0;
+        unsigned frame_width = 0, frame_height = 0;
+        g_host->video_dimensions(frame_width, frame_height);
+        const auto non_black_pixels = g_host->video_non_black_pixel_count();
+        const auto total_pixels = static_cast<std::uint64_t>(frame_width) * frame_height;
         char report[256]{};
         std::snprintf(report, sizeof(report),
-                      "Winebox software video: bridge submissions %.1f/s, frontend presents %.1f/s, avg copy %.3f ms, avg present %.3f ms",
-                      submitted_fps, frontend_fps, average_publish_ms, average_present_ms);
+                      "Winebox software video: submissions %.1f/s, presents %.1f/s, nonblack %llu/%llu px at %ux%u, avg copy %.3f ms, avg present %.3f ms",
+                      submitted_fps, frontend_fps,
+                      static_cast<unsigned long long>(non_black_pixels),
+                      static_cast<unsigned long long>(total_pixels), frame_width, frame_height,
+                      average_publish_ms, average_present_ms);
         log_message(RETRO_LOG_INFO, report);
         g_video_stats_started = now;
         g_video_stats_publications = publications;

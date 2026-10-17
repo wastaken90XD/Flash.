@@ -34,6 +34,7 @@ public:
     bool video_dimensions(unsigned& width, unsigned& height) const;
     std::uint64_t video_publication_count() const noexcept;
     std::uint64_t video_publication_time_nanoseconds() const noexcept;
+    std::uint64_t video_non_black_pixel_count() const;
 
     // Adds interleaved stereo signed-16-bit frames to a bounded queue.
     // Returns false for null data, zero frames, or queue-capacity overflow.

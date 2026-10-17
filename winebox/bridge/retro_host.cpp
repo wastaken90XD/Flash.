@@ -76,6 +76,12 @@ std::uint64_t RetroHost::video_publication_time_nanoseconds() const noexcept {
     return video_publication_time_nanoseconds_.load(std::memory_order_relaxed);
 }
 
+std::uint64_t RetroHost::video_non_black_pixel_count() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return static_cast<std::uint64_t>(std::count_if(presented_pixels_.begin(), presented_pixels_.end(),
+        [](std::uint32_t pixel) { return (pixel & 0x00FFFFFFu) != 0; }));
+}
+
 bool RetroHost::present_video() {
     if (!video_) {
         return false;
