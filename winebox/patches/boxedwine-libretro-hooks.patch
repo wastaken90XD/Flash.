@@ -1,19 +1,20 @@
 diff --git a/platform/sdl/kdspaudio.cpp b/platform/sdl/kdspaudio.cpp
-index 140d1a8..3aa8c55 100644
+index 140d1a8..ca2f435 100644
 --- a/platform/sdl/kdspaudio.cpp
 +++ b/platform/sdl/kdspaudio.cpp
-@@ -22,6 +22,10 @@
+@@ -22,6 +22,11 @@
  #include <SDL.h>
  #include <algorithm>
  #include "../../source/kernel/devs/oss.h"
 +#ifdef BOXEDWINE_LIBRETRO
 +#include "boxedwine_hooks.hpp"
++#include "retro_host.hpp"
 +#include "audio_adapter.hpp"
 +#endif
  
  #define DSP_BUFFER_SIZE (1024*32)
  
-@@ -220,6 +224,28 @@ public:
+@@ -220,6 +225,28 @@ public:
  	}
  
  	void queueDeviceAudio(const void* data, U32 bytes) {
@@ -42,7 +43,7 @@ index 140d1a8..3aa8c55 100644
  #ifdef __EMSCRIPTEN__
  		if (this->webDevice) {
  			U32 frames = bytes / (sizeof(float) * this->got.channels);
-@@ -469,6 +495,13 @@ void KDspAudioSdl::openAudio(U32 format, U32 freq, U32 channels) {
+@@ -469,6 +496,13 @@ void KDspAudioSdl::openAudio(U32 format, U32 freq, U32 channels) {
  	this->want.freq = freq;
  	this->want.channels = channels;
  	this->openedFormat = format;
@@ -57,20 +58,21 @@ index 140d1a8..3aa8c55 100644
  	if (!KSystem::soundEnabled) {
  		this->open = true;
 diff --git a/platform/sdl/knativescreenSDL.cpp b/platform/sdl/knativescreenSDL.cpp
-index 7a5582d..ad5e1e0 100644
+index 7a5582d..80d2f85 100644
 --- a/platform/sdl/knativescreenSDL.cpp
 +++ b/platform/sdl/knativescreenSDL.cpp
-@@ -25,6 +25,9 @@
+@@ -25,6 +25,10 @@
  #include "knativeinputSDL.h"
  #include "knativescreenSDL.h"
  #include "knativesystem.h"
 +#ifdef BOXEDWINE_LIBRETRO
 +#include "boxedwine_hooks.hpp"
++#include "retro_host.hpp"
 +#endif
  #include "kopengl.h"
  #include "../../source/x11/x11.h"
  #if defined(BOXEDWINE_NATIVE_RUNTIME) && defined(__linux__)
-@@ -141,6 +144,9 @@ KNativeScreenSDL::KNativeScreenSDL(U32 cx, U32 cy, U32 bpp, int scaleX, int scal
+@@ -141,6 +145,9 @@ KNativeScreenSDL::KNativeScreenSDL(U32 cx, U32 cy, U32 bpp, int scaleX, int scal
      this->defaultScreenWidth = cx;
      this->defaultScreenHeight = cy;
      this->defaultScreenBpp = bpp;
@@ -80,7 +82,7 @@ index 7a5582d..ad5e1e0 100644
  
      recreateMainWindow();
  }
-@@ -161,6 +167,12 @@ void KNativeScreenSDL::setScreenSize(U32 cx, U32 cy) {
+@@ -161,6 +168,12 @@ void KNativeScreenSDL::setScreenSize(U32 cx, U32 cy) {
          return;
      }
      input->setScreenSize(cx, cy);
@@ -93,7 +95,7 @@ index 7a5582d..ad5e1e0 100644
  #if defined(__EMSCRIPTEN__) && defined(BOXEDWINE_OPENGL_SDL)
      boxedwineSetWebGLPresentSize(cx, cy);
  #endif
-@@ -291,6 +303,12 @@ void KNativeScreenSDL::showWindow(bool show) {
+@@ -291,6 +304,12 @@ void KNativeScreenSDL::showWindow(bool show) {
  }
  
  void KNativeScreenSDL::clear() {
@@ -106,7 +108,7 @@ index 7a5582d..ad5e1e0 100644
  #ifdef BOXEDWINE_RECORDER
      if (Recorder::instance) {
          BOXEDWINE_MUTEX_LOCK(drawingMutex);
-@@ -433,6 +451,29 @@ void KNativeScreenSDL::putBitsOnWnd(U32 id, U8* bits, U32 bitsPerPixel, U32 srcP
+@@ -433,6 +452,29 @@ void KNativeScreenSDL::putBitsOnWnd(U32 id, U8* bits, U32 bitsPerPixel, U32 srcP
      } else if (bitsPerPixel == 16 && wnd->bits) {
          bits = wnd->bits;
      }
@@ -136,7 +138,7 @@ index 7a5582d..ad5e1e0 100644
  #ifdef BOXEDWINE_RECORDER
      if ((Recorder::instance || Player::instance) && screenBpp() > 8) {
          int wndWidth = width;
-@@ -542,6 +583,20 @@ void KNativeScreenSDL::putBitsOnWnd(U32 id, U8* bits, U32 bitsPerPixel, U32 srcP
+@@ -542,6 +584,20 @@ void KNativeScreenSDL::putBitsOnWnd(U32 id, U8* bits, U32 bitsPerPixel, U32 srcP
  }
  
  void KNativeScreenSDL::present() {
