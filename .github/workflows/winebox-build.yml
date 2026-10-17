@@ -1,0 +1,111 @@
+name: winebox-windows-builds
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'winebox/**'
+      - 'docs/winebox/**'
+      - '.github/workflows/winebox-build.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  windows-x64:
+    runs-on: windows-2025
+    steps:
+      - name: Checkout this branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Configure Winebox bridge tests
+        run: cmake -S winebox/bridge -B build/winebox-bridge -A x64
+      - name: Build and test Winebox bridge
+        run: |
+          cmake --build build/winebox-bridge --config Debug
+          ctest --test-dir build/winebox-bridge -C Debug --output-on-failure
+      - name: Checkout BoxedWine pinned snapshot
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: danoon2/Boxedwine
+          ref: 6c70c03c6a611a0993ccc922a4f10e658af02f49
+          path: boxedwine
+      - name: Apply Winebox SDL platform patch
+        shell: pwsh
+        run: |
+          git -C boxedwine apply --check ../winebox/patches/boxedwine-libretro-hooks.patch
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git -C boxedwine apply ../winebox/patches/boxedwine-libretro-hooks.patch
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Compile libretro core objects against pinned SDL2
+        run: |
+          cmake -S winebox/core -B build/winebox-core -A x64 -DWINEBOX_SDL2_INCLUDE_DIR=boxedwine/lib/sdl2/include
+          cmake --build build/winebox-core --config Release --parallel
+      - name: Build pinned BoxedWine and native dependencies (Windows x64)
+        shell: pwsh
+        run: |
+          $solution = "boxedwine/project/msvc/BoxedWine/BoxedWine.sln"
+          msbuild $solution /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Add the Winebox MSBuild source target
+        shell: pwsh
+        run: |
+          $project = "boxedwine/project/msvc/BoxedWine/BoxedWine/BoxedWine.vcxproj"
+          $source = [System.IO.File]::ReadAllText((Resolve-Path $project).Path)
+          if ($source -notmatch "WineboxLibretroTargets") {
+            $marker = "</Project>"
+            $index = $source.LastIndexOf($marker, [System.StringComparison]::Ordinal)
+            if ($index -lt 0) { throw "Could not locate closing Project tag in BoxedWine.vcxproj" }
+            $importLine = '  <Import Project="$(WineboxLibretroTargets)" Condition="Exists(''$(WineboxLibretroTargets)'')" />'
+            $source = $source.Substring(0, $index) + $importLine + [Environment]::NewLine + $source.Substring($index)
+            [System.IO.File]::WriteAllText((Resolve-Path $project).Path, $source, [System.Text.UTF8Encoding]::new($false))
+          }
+      - name: Build BoxedWine libretro core DLL (Windows x64)
+        shell: pwsh
+        run: |
+          $project = "boxedwine/project/msvc/BoxedWine/BoxedWine/BoxedWine.vcxproj"
+          $targets = (Resolve-Path "winebox/core/BoxedWineLibretro.targets").Path
+          New-Item -ItemType Directory -Force -Path boxedwine-output, build/winebox-libretro-obj | Out-Null
+          $outDir = (Resolve-Path "boxedwine-output").Path.TrimEnd('\') + '\'
+          $intDir = (Resolve-Path "build/winebox-libretro-obj").Path.TrimEnd('\') + '\'
+          $msbuildArgs = @(
+            $project,
+            "/m",
+            "/p:Configuration=Release",
+            "/p:Platform=x64",
+            "/p:ConfigurationType=DynamicLibrary",
+            "/p:TargetName=winebox_libretro",
+            "/p:WineboxLibretroTargets=$targets",
+            "/p:OutDir=$outDir",
+            "/p:IntDir=$intDir",
+            "/verbosity:minimal"
+          )
+          & msbuild @msbuildArgs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $dll = Join-Path (Resolve-Path boxedwine-output).Path "winebox_libretro.dll"
+          if (-not (Test-Path $dll)) { throw "MSBuild succeeded but did not produce winebox_libretro.dll" }
+      - name: Verify required libretro exports
+        shell: pwsh
+        run: |
+          $dll = (Resolve-Path "boxedwine-output/winebox_libretro.dll").Path
+          $exports = & dumpbin /nologo /exports $dll
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $required = @(
+            "retro_api_version", "retro_set_environment", "retro_set_video_refresh",
+            "retro_set_audio_sample", "retro_set_audio_sample_batch", "retro_set_input_poll",
+            "retro_set_input_state", "retro_init", "retro_deinit", "retro_get_system_info",
+            "retro_get_system_av_info", "retro_load_game", "retro_unload_game", "retro_run"
+          )
+          foreach ($symbol in $required) {
+            if (-not ($exports | Select-String -SimpleMatch $symbol)) {
+              throw "Required libretro export missing from DLL: $symbol"
+            }
+          }
+      - name: Upload Windows x64 core
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: winebox-libretro-windows-x64-6c70c03
+          path: |
+            boxedwine-output/winebox_libretro.dll
+            winebox/winebox_libretro.info
+          if-no-files-found: error
+          retention-days: 7
