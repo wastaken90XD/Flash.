@@ -15,41 +15,56 @@ jobs:
   windows-x64:
     runs-on: windows-2025
     steps:
-      - name: Checkout this branch
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          path: flash
+      - name: Clone this repository to a Windows-safe path
+        shell: bash
+        working-directory: C:/
+        run: |
+          rm -rf /c/flash
+          git clone --no-checkout "https://github.com/${GITHUB_REPOSITORY}.git" /c/flash
+          cd /c/flash
+          git fetch origin "${GITHUB_SHA}"
+          git checkout --force "${GITHUB_SHA}"
       - name: Configure Winebox bridge tests
-        run: cmake -S flash/winebox/bridge -B build/winebox-bridge -A x64
+        working-directory: C:/flash
+        run: cmake -S winebox/bridge -B build/winebox-bridge -A x64
       - name: Build and test Winebox bridge
+        working-directory: C:/flash
         run: |
           cmake --build build/winebox-bridge --config Debug
           ctest --test-dir build/winebox-bridge -C Debug --output-on-failure
       - name: Checkout BoxedWine pinned snapshot
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          repository: danoon2/Boxedwine
-          ref: 6c70c03c6a611a0993ccc922a4f10e658af02f49
-          path: boxedwine
+        shell: bash
+        working-directory: C:/flash
+        run: |
+          mkdir -p boxedwine
+          cd boxedwine
+          git init
+          git remote add origin https://github.com/danoon2/Boxedwine.git
+          git fetch --depth 1 origin 6c70c03c6a611a0993ccc922a4f10e658af02f49
+          git checkout --detach FETCH_HEAD
       - name: Apply Winebox SDL platform patch
         shell: pwsh
+        working-directory: C:/flash
         run: |
-          git -C boxedwine apply --check ../flash/winebox/patches/boxedwine-libretro-hooks.patch
+          git -C boxedwine apply --check ../winebox/patches/boxedwine-libretro-hooks.patch
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          git -C boxedwine apply ../flash/winebox/patches/boxedwine-libretro-hooks.patch
+          git -C boxedwine apply ../winebox/patches/boxedwine-libretro-hooks.patch
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Compile libretro core objects against pinned SDL2
+        working-directory: C:/flash
         run: |
-          cmake -S flash/winebox/core -B build/winebox-core -A x64 -DWINEBOX_SDL2_INCLUDE_DIR=boxedwine/lib/sdl2/include
+          cmake -S winebox/core -B build/winebox-core -A x64 -DWINEBOX_SDL2_INCLUDE_DIR=boxedwine/lib/sdl2/include
           cmake --build build/winebox-core --config Release --parallel
       - name: Build pinned BoxedWine and native dependencies (Windows x64)
         shell: pwsh
+        working-directory: C:/flash
         run: |
           $solution = "boxedwine/project/msvc/BoxedWine/BoxedWine.sln"
           msbuild $solution /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Add the Winebox MSBuild source target
         shell: pwsh
+        working-directory: C:/flash
         run: |
           $project = "boxedwine/project/msvc/BoxedWine/BoxedWine/BoxedWine.vcxproj"
           $source = [System.IO.File]::ReadAllText((Resolve-Path $project).Path)
@@ -63,9 +78,10 @@ jobs:
           }
       - name: Build BoxedWine libretro core DLL (Windows x64)
         shell: pwsh
+        working-directory: C:/flash
         run: |
           $project = "boxedwine/project/msvc/BoxedWine/BoxedWine/BoxedWine.vcxproj"
-          $targets = (Resolve-Path "flash/winebox/core/BoxedWineLibretro.targets").Path
+          $targets = (Resolve-Path "winebox/core/BoxedWineLibretro.targets").Path
           New-Item -ItemType Directory -Force -Path boxedwine-output, build/winebox-libretro-obj | Out-Null
           $outDir = (Resolve-Path "boxedwine-output").Path.TrimEnd('\') + '\'
           $intDir = (Resolve-Path "build/winebox-libretro-obj").Path.TrimEnd('\') + '\'
@@ -87,6 +103,7 @@ jobs:
           if (-not (Test-Path $dll)) { throw "MSBuild succeeded but did not produce winebox_libretro.dll" }
       - name: Verify required libretro exports
         shell: pwsh
+        working-directory: C:/flash
         run: |
           $dll = (Resolve-Path "boxedwine-output/winebox_libretro.dll").Path
           $exports = & dumpbin /nologo /exports $dll
@@ -107,7 +124,7 @@ jobs:
         with:
           name: winebox-libretro-windows-x64-6c70c03
           path: |
-            boxedwine-output/winebox_libretro.dll
-            flash/winebox/winebox_libretro.info
+            C:/flash/boxedwine-output/winebox_libretro.dll
+            C:/flash/winebox/winebox_libretro.info
           if-no-files-found: error
           retention-days: 7
