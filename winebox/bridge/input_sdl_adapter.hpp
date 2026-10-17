@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstdint>
 #include <libretro.h>
 
 namespace winebox {
@@ -10,6 +11,8 @@ public:
     SdlInputAdapter(retro_input_poll_t poll, retro_input_state_t state, unsigned width, unsigned height);
     void set_dimensions(unsigned width, unsigned height);
     void set_callbacks(retro_input_poll_t poll, retro_input_state_t state);
+    void set_keyboard_callback_enabled(bool enabled);
+    void keyboard_event(bool down, unsigned keycode, std::uint32_t character, std::uint16_t modifiers);
     void poll_and_enqueue();
     void reset();
 
@@ -23,6 +26,7 @@ private:
     bool left_down_ = false;
     bool right_down_ = false;
     bool middle_down_ = false;
+    bool keyboard_callback_enabled_ = false;
     std::array<bool, RETROK_LAST> key_down_{};
 };
 

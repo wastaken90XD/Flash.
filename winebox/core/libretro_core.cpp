@@ -188,6 +188,14 @@ void stop_guest() {
     g_guest.join();
 }
 
+void RETRO_CALLCONV keyboard_event(bool down,
+                                   unsigned keycode,
+                                   std::uint32_t character,
+                                   std::uint16_t modifiers) {
+    if (g_input)
+        g_input->keyboard_event(down, keycode, character, modifiers);
+}
+
 } // namespace
 
 namespace winebox {
@@ -270,6 +278,15 @@ RETRO_API void RETRO_CALLCONV retro_init(void) {
     g_video_stats_present_milliseconds = 0.0;
     g_input = std::make_unique<winebox::SdlInputAdapter>(g_input_poll, g_input_state,
                                                          kInitialWidth, kInitialHeight);
+    if (g_environment) {
+        static retro_keyboard_callback keyboard_callback{keyboard_event};
+        const bool keyboard_callback_supported =
+            g_environment(RETRO_ENVIRONMENT_SET_KEYBOARD_CALLBACK, &keyboard_callback);
+        g_input->set_keyboard_callback_enabled(keyboard_callback_supported);
+        log_message(keyboard_callback_supported ? RETRO_LOG_INFO : RETRO_LOG_WARN,
+                    keyboard_callback_supported ? "Winebox registered the frontend keyboard callback."
+                                               : "Winebox keyboard callback unavailable; using input polling fallback.");
+    }
     g_initialized = true;
 }
 
