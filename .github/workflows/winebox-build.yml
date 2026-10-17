@@ -91,6 +91,7 @@ jobs:
             [System.IO.File]::WriteAllText((Resolve-Path $project).Path, $source, [System.Text.UTF8Encoding]::new($false))
           }
       - name: Build BoxedWine libretro core DLL (Windows x64)
+        id: core-build
         shell: pwsh
         working-directory: C:/flash
         run: |
@@ -118,16 +119,23 @@ jobs:
           if ($buildExitCode -ne 0) {
             $diagnostics = $buildOutput | Select-String -Pattern "error|MSB[0-9]+|fatal" | Select-Object -Last 30
             if (-not $diagnostics) { $diagnostics = $buildOutput | Select-Object -Last 60 }
+            $diagnosticText = (($diagnostics | ForEach-Object { $_.ToString() }) -join " | ") -replace "[\r\n]+", " "
+            if (-not $diagnosticText) { $diagnosticText = "MSBuild exited $buildExitCode without console diagnostics; see the saved log." }
+            if ($diagnosticText.Length -gt 600) { $diagnosticText = $diagnosticText.Substring(0, 600) }
+            "failed=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            "diagnostic=$diagnosticText" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
             Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "## Winebox core MSBuild diagnostics"
-            foreach ($line in $diagnostics) {
-              $message = $line.ToString()
-              Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- ``$message``"
-              Write-Output "::error file=.github/workflows/winebox-build.yml,line=100,title=Winebox core build diagnostic::$message"
-            }
-            exit $buildExitCode
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $diagnosticText
+            Write-Output "::error file=.github/workflows/winebox-build.yml,line=100,title=Winebox core build diagnostic::$diagnosticText"
+            exit 0
           }
           $dll = Join-Path (Resolve-Path boxedwine-output).Path "winebox_libretro.dll"
           if (-not (Test-Path $dll)) { throw "MSBuild succeeded but did not produce winebox_libretro.dll" }
+      - name: "Fail on libretro DLL build errors: ${{ steps.core-build.outputs.diagnostic }}"
+        if: steps.core-build.outputs.failed == 'true'
+        shell: pwsh
+        working-directory: C:/flash
+        run: exit 1
       - name: Verify required libretro exports
         shell: pwsh
         working-directory: C:/flash
