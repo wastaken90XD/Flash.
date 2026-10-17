@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
@@ -27,10 +28,12 @@ public:
                        unsigned height,
                        std::size_t source_pitch);
 
-    // Called from the libretro thread. The callback sees a stable copy for the
-    // duration of the call, and the frontend receives tightly packed rows.
+    // Called from the libretro thread. Double-buffer swapping keeps the frame
+    // stable during the callback without copying it a second time.
     bool present_video();
     bool video_dimensions(unsigned& width, unsigned& height) const;
+    std::uint64_t video_publication_count() const noexcept;
+    std::uint64_t video_publication_time_nanoseconds() const noexcept;
 
     // Adds interleaved stereo signed-16-bit frames to a bounded queue.
     // Returns false for null data, zero frames, or queue-capacity overflow.
@@ -63,8 +66,15 @@ private:
 
     mutable std::mutex mutex_;
     std::vector<std::uint32_t> video_pixels_;
+    std::vector<std::uint32_t> presented_pixels_;
     unsigned video_width_ = 0;
     unsigned video_height_ = 0;
+    unsigned presented_width_ = 0;
+    unsigned presented_height_ = 0;
+    bool video_pending_ = false;
+    bool has_presented_video_ = false;
+    std::atomic<std::uint64_t> video_publication_count_{0};
+    std::atomic<std::uint64_t> video_publication_time_nanoseconds_{0};
     std::vector<std::int16_t> pending_audio_;
 };
 

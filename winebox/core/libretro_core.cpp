@@ -8,6 +8,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -25,6 +26,7 @@ namespace {
 constexpr unsigned kInitialWidth = 800;
 constexpr unsigned kInitialHeight = 600;
 constexpr unsigned kAudioFramesPerRun = 735; // 44.1 kHz at 60 Hz.
+constexpr auto kVideoStatsInterval = std::chrono::seconds(5);
 constexpr const char* kSystemSubdir = "winebox";
 constexpr const char* kRootArchive = "TinyCore15Wine11.0.zip";
 constexpr const char* kProjectorExe = "FlashPlayer.exe";
@@ -47,6 +49,11 @@ bool g_exit_reported = false;
 int g_guest_exit_code = 0;
 std::vector<std::string> g_guest_args;
 std::string g_save_dir;
+std::chrono::steady_clock::time_point g_video_stats_started{};
+std::uint64_t g_video_stats_publications = 0;
+std::uint64_t g_video_stats_publish_nanoseconds = 0;
+std::uint64_t g_video_stats_present_calls = 0;
+double g_video_stats_present_milliseconds = 0.0;
 
 void log_message(enum retro_log_level level, const char* message) {
     if (g_log && message)
@@ -232,6 +239,11 @@ RETRO_API void RETRO_CALLCONV retro_init(void) {
     std::vector<std::uint32_t> blank(static_cast<std::size_t>(kInitialWidth) * kInitialHeight, 0);
     g_host->publish_video(blank.data(), kInitialWidth, kInitialHeight,
                           static_cast<std::size_t>(kInitialWidth) * sizeof(std::uint32_t));
+    g_video_stats_started = std::chrono::steady_clock::now();
+    g_video_stats_publications = g_host->video_publication_count();
+    g_video_stats_publish_nanoseconds = g_host->video_publication_time_nanoseconds();
+    g_video_stats_present_calls = 0;
+    g_video_stats_present_milliseconds = 0.0;
     g_input = std::make_unique<winebox::SdlInputAdapter>(g_input_poll, g_input_state,
                                                          kInitialWidth, kInitialHeight);
     g_initialized = true;
@@ -280,10 +292,43 @@ RETRO_API void RETRO_CALLCONV retro_run(void) {
     }
     if (g_input)
         g_input->poll_and_enqueue();
+    const auto present_started = std::chrono::steady_clock::now();
+    g_host->present_video();
+    g_video_stats_present_milliseconds +=
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - present_started).count();
+    ++g_video_stats_present_calls;
+
     unsigned width = 0, height = 0;
     if (g_host->video_dimensions(width, height) && g_input)
         g_input->set_dimensions(width, height);
-    g_host->present_video();
+
+    const auto now = std::chrono::steady_clock::now();
+    const auto elapsed = now - g_video_stats_started;
+    if (g_game_loaded && elapsed >= kVideoStatsInterval) {
+        const double seconds = std::chrono::duration<double>(elapsed).count();
+        const auto publications = g_host->video_publication_count();
+        const auto publish_nanoseconds = g_host->video_publication_time_nanoseconds();
+        const auto publication_delta = publications - g_video_stats_publications;
+        const double submitted_fps = static_cast<double>(publication_delta) / seconds;
+        const double frontend_fps = static_cast<double>(g_video_stats_present_calls) / seconds;
+        const double average_publish_ms = publication_delta
+            ? static_cast<double>(publish_nanoseconds - g_video_stats_publish_nanoseconds) /
+                  1'000'000.0 / static_cast<double>(publication_delta)
+            : 0.0;
+        const double average_present_ms = g_video_stats_present_calls
+            ? g_video_stats_present_milliseconds / static_cast<double>(g_video_stats_present_calls)
+            : 0.0;
+        char report[256]{};
+        std::snprintf(report, sizeof(report),
+                      "Winebox software video: bridge submissions %.1f/s, frontend presents %.1f/s, avg copy %.3f ms, avg present %.3f ms",
+                      submitted_fps, frontend_fps, average_publish_ms, average_present_ms);
+        log_message(RETRO_LOG_INFO, report);
+        g_video_stats_started = now;
+        g_video_stats_publications = publications;
+        g_video_stats_publish_nanoseconds = publish_nanoseconds;
+        g_video_stats_present_calls = 0;
+        g_video_stats_present_milliseconds = 0.0;
+    }
     g_host->drain_audio_exact(kAudioFramesPerRun);
 }
 

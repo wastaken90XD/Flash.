@@ -53,6 +53,9 @@ int main() {
     assert(video_width == 2 && video_height == 2);
     assert(video_pitch == 2 * sizeof(std::uint32_t));
     assert((video_copy == std::vector<std::uint32_t>{0x00112233, 0x00445566, 0x00778899, 0x00aabbcc}));
+    assert(host.video_publication_count() == 1);
+    assert(host.present_video()); // Re-present the last frame without another guest publish.
+    assert((video_copy == std::vector<std::uint32_t>{0x00112233, 0x00445566, 0x00778899, 0x00aabbcc}));
     assert(!host.publish_video(nullptr, 2, 2, 2 * sizeof(std::uint32_t)));
     assert(!host.publish_video(padded_pixels.data(), 2, 2, sizeof(std::uint32_t)));
 

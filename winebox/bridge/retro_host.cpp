@@ -1,6 +1,7 @@
 #include "retro_host.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 #include <limits>
 
@@ -21,6 +22,7 @@ bool RetroHost::publish_video(const std::uint32_t* pixels,
                               unsigned width,
                               unsigned height,
                               std::size_t source_pitch) {
+    const auto copy_started = std::chrono::steady_clock::now();
     if (!pixels || width == 0 || height == 0 || width > kMaxDimension || height > kMaxDimension) {
         return false;
     }
@@ -41,21 +43,37 @@ bool RetroHost::publish_video(const std::uint32_t* pixels,
                     row_bytes);
     }
 
-    std::lock_guard<std::mutex> lock(mutex_);
-    video_pixels_.swap(copy);
-    video_width_ = width;
-    video_height_ = height;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        video_pixels_.swap(copy);
+        video_width_ = width;
+        video_height_ = height;
+        video_pending_ = true;
+    }
+    video_publication_count_.fetch_add(1, std::memory_order_relaxed);
+    const auto copy_nanoseconds = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now() - copy_started).count();
+    video_publication_time_nanoseconds_.fetch_add(static_cast<std::uint64_t>(copy_nanoseconds),
+                                                  std::memory_order_relaxed);
     return true;
 }
 
 bool RetroHost::video_dimensions(unsigned& width, unsigned& height) const {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (video_pixels_.empty()) {
+    if (!has_presented_video_) {
         return false;
     }
-    width = video_width_;
-    height = video_height_;
+    width = presented_width_;
+    height = presented_height_;
     return true;
+}
+
+std::uint64_t RetroHost::video_publication_count() const noexcept {
+    return video_publication_count_.load(std::memory_order_relaxed);
+}
+
+std::uint64_t RetroHost::video_publication_time_nanoseconds() const noexcept {
+    return video_publication_time_nanoseconds_.load(std::memory_order_relaxed);
 }
 
 bool RetroHost::present_video() {
@@ -63,20 +81,27 @@ bool RetroHost::present_video() {
         return false;
     }
 
-    std::vector<std::uint32_t> frame;
+    const std::uint32_t* pixels = nullptr;
     unsigned width = 0;
     unsigned height = 0;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (video_pixels_.empty()) {
+        if (video_pending_) {
+            video_pixels_.swap(presented_pixels_);
+            presented_width_ = video_width_;
+            presented_height_ = video_height_;
+            video_pending_ = false;
+            has_presented_video_ = true;
+        }
+        if (!has_presented_video_ || presented_pixels_.empty()) {
             return false;
         }
-        frame = video_pixels_;
-        width = video_width_;
-        height = video_height_;
+        pixels = presented_pixels_.data();
+        width = presented_width_;
+        height = presented_height_;
     }
 
-    video_(frame.data(), width, height, static_cast<std::size_t>(width) * sizeof(std::uint32_t));
+    video_(pixels, width, height, static_cast<std::size_t>(width) * sizeof(std::uint32_t));
     return true;
 }
 
