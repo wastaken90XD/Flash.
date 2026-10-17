@@ -60,7 +60,7 @@ jobs:
         working-directory: C:/flash
         run: |
           $solution = "boxedwine/project/msvc/BoxedWine/BoxedWine.sln"
-          msbuild $solution /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
+          msbuild $solution /m /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 /verbosity:minimal
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Add the Winebox MSBuild source target
         shell: pwsh
@@ -90,6 +90,7 @@ jobs:
             "/m",
             "/p:Configuration=Release",
             "/p:Platform=x64",
+            "/p:PlatformToolset=v143",
             "/p:ConfigurationType=DynamicLibrary",
             "/p:TargetName=winebox_libretro",
             "/p:WineboxLibretroTargets=$targets",
