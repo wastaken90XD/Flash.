@@ -47,7 +47,13 @@ bool RetroHost::publish_video(const std::uint32_t* pixels,
         return false;
     }
 
-    std::vector<std::uint32_t> copy(static_cast<std::size_t>(width) * height);
+    std::lock_guard<std::mutex> publish_lock(publish_mutex_);
+    std::vector<std::uint32_t> copy;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        copy.swap(video_staging_pixels_);
+    }
+    copy.resize(static_cast<std::size_t>(width) * height);
     const auto* source = reinterpret_cast<const std::uint8_t*>(pixels);
     auto* destination = reinterpret_cast<std::uint8_t*>(copy.data());
     for (unsigned row = 0; row < height; ++row) {
@@ -59,6 +65,7 @@ bool RetroHost::publish_video(const std::uint32_t* pixels,
     {
         std::lock_guard<std::mutex> lock(mutex_);
         video_pixels_.swap(copy);
+        video_staging_pixels_.swap(copy);
         video_width_ = width;
         video_height_ = height;
         video_pending_ = true;

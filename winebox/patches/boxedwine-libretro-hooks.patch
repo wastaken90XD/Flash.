@@ -138,19 +138,17 @@ index 7a5582d..80d2f85 100644
  #ifdef BOXEDWINE_RECORDER
      if ((Recorder::instance || Player::instance) && screenBpp() > 8) {
          int wndWidth = width;
-@@ -542,6 +584,20 @@ void KNativeScreenSDL::putBitsOnWnd(U32 id, U8* bits, U32 bitsPerPixel, U32 srcP
+@@ -542,6 +584,18 @@ void KNativeScreenSDL::putBitsOnWnd(U32 id, U8* bits, U32 bitsPerPixel, U32 srcP
  }
  
  void KNativeScreenSDL::present() {
 +#ifdef BOXEDWINE_LIBRETRO
 +    if (KSystem::videoOption == VIDEO_NO_WINDOW) {
 +        if (winebox::RetroHost* host = winebox::current_host()) {
-+            std::vector<U32> frame;
-+            {
-+                std::lock_guard<std::mutex> lock(libretroFrameMutex);
-+                frame = libretroFrame;
-+            }
-+            host->publish_video(frame.data(), screenWidth(), screenHeight(), static_cast<std::size_t>(screenWidth()) * sizeof(U32));
++            // publish_video copies the pixels synchronously. Keep the source
++            // locked during that copy instead of making an intermediate frame.
++            std::lock_guard<std::mutex> lock(libretroFrameMutex);
++            host->publish_video(libretroFrame.data(), screenWidth(), screenHeight(), static_cast<std::size_t>(screenWidth()) * sizeof(U32));
 +        }
 +        presented = true;
 +        return;

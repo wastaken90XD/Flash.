@@ -71,8 +71,10 @@ private:
     const std::size_t max_audio_frames_;
 
     mutable std::mutex mutex_;
+    std::mutex publish_mutex_;
     std::vector<std::uint32_t> video_pixels_;
     std::vector<std::uint32_t> presented_pixels_;
+    std::vector<std::uint32_t> video_staging_pixels_;
     unsigned video_width_ = 0;
     unsigned video_height_ = 0;
     unsigned presented_width_ = 0;
