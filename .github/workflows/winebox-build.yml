@@ -17,8 +17,10 @@ jobs:
     steps:
       - name: Checkout this branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: flash
       - name: Configure Winebox bridge tests
-        run: cmake -S winebox/bridge -B build/winebox-bridge -A x64
+        run: cmake -S flash/winebox/bridge -B build/winebox-bridge -A x64
       - name: Build and test Winebox bridge
         run: |
           cmake --build build/winebox-bridge --config Debug
@@ -32,13 +34,13 @@ jobs:
       - name: Apply Winebox SDL platform patch
         shell: pwsh
         run: |
-          git -C boxedwine apply --check ../winebox/patches/boxedwine-libretro-hooks.patch
+          git -C boxedwine apply --check ../flash/winebox/patches/boxedwine-libretro-hooks.patch
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          git -C boxedwine apply ../winebox/patches/boxedwine-libretro-hooks.patch
+          git -C boxedwine apply ../flash/winebox/patches/boxedwine-libretro-hooks.patch
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Compile libretro core objects against pinned SDL2
         run: |
-          cmake -S winebox/core -B build/winebox-core -A x64 -DWINEBOX_SDL2_INCLUDE_DIR=boxedwine/lib/sdl2/include
+          cmake -S flash/winebox/core -B build/winebox-core -A x64 -DWINEBOX_SDL2_INCLUDE_DIR=boxedwine/lib/sdl2/include
           cmake --build build/winebox-core --config Release --parallel
       - name: Build pinned BoxedWine and native dependencies (Windows x64)
         shell: pwsh
@@ -63,7 +65,7 @@ jobs:
         shell: pwsh
         run: |
           $project = "boxedwine/project/msvc/BoxedWine/BoxedWine/BoxedWine.vcxproj"
-          $targets = (Resolve-Path "winebox/core/BoxedWineLibretro.targets").Path
+          $targets = (Resolve-Path "flash/winebox/core/BoxedWineLibretro.targets").Path
           New-Item -ItemType Directory -Force -Path boxedwine-output, build/winebox-libretro-obj | Out-Null
           $outDir = (Resolve-Path "boxedwine-output").Path.TrimEnd('\') + '\'
           $intDir = (Resolve-Path "build/winebox-libretro-obj").Path.TrimEnd('\') + '\'
@@ -106,6 +108,6 @@ jobs:
           name: winebox-libretro-windows-x64-6c70c03
           path: |
             boxedwine-output/winebox_libretro.dll
-            winebox/winebox_libretro.info
+            flash/winebox/winebox_libretro.info
           if-no-files-found: error
           retention-days: 7
