@@ -60,8 +60,16 @@ jobs:
         working-directory: C:/flash
         run: |
           $solution = "boxedwine/project/msvc/BoxedWine/BoxedWine.sln"
-          msbuild $solution /m /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 /verbosity:minimal
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $buildLog = Join-Path (Resolve-Path "build").Path "boxedwine-msbuild.log"
+          $buildOutput = & msbuild $solution /m /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 /verbosity:minimal 2>&1
+          $buildExitCode = $LASTEXITCODE
+          $buildOutput | Out-File -FilePath $buildLog -Encoding utf8
+          if ($buildExitCode -ne 0) {
+            $diagnostics = $buildOutput | Select-String -Pattern "error|MSB[0-9]+|fatal" | Select-Object -Last 30
+            if (-not $diagnostics) { $diagnostics = $buildOutput | Select-Object -Last 60 }
+            foreach ($line in $diagnostics) { Write-Output "::error::$line" }
+            exit $buildExitCode
+          }
       - name: Add the Winebox MSBuild source target
         shell: pwsh
         working-directory: C:/flash
@@ -98,8 +106,15 @@ jobs:
             "/p:IntDir=$intDir",
             "/verbosity:minimal"
           )
-          & msbuild @msbuildArgs
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $buildOutput = & msbuild @msbuildArgs 2>&1
+          $buildExitCode = $LASTEXITCODE
+          $buildOutput | Out-File -FilePath (Join-Path (Resolve-Path "build").Path "winebox-libretro-msbuild.log") -Encoding utf8
+          if ($buildExitCode -ne 0) {
+            $diagnostics = $buildOutput | Select-String -Pattern "error|MSB[0-9]+|fatal" | Select-Object -Last 30
+            if (-not $diagnostics) { $diagnostics = $buildOutput | Select-Object -Last 60 }
+            foreach ($line in $diagnostics) { Write-Output "::error::$line" }
+            exit $buildExitCode
+          }
           $dll = Join-Path (Resolve-Path boxedwine-output).Path "winebox_libretro.dll"
           if (-not (Test-Path $dll)) { throw "MSBuild succeeded but did not produce winebox_libretro.dll" }
       - name: Verify required libretro exports
