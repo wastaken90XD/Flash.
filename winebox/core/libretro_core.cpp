@@ -88,9 +88,12 @@ bool prepare_launch(const retro_game_info* game) {
 
     const char* system_directory = nullptr;
     const char* save_directory = nullptr;
-    if (!g_environment(RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY, &system_directory) || !system_directory ||
-        !g_environment(RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY, &save_directory) || !save_directory) {
-        log_message(RETRO_LOG_ERROR, "Winebox requires frontend system and save directories.");
+    if (!g_environment(RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY, &system_directory) || !system_directory) {
+        log_message(RETRO_LOG_ERROR, "Winebox could not get RetroArch's system directory.");
+        return false;
+    }
+    if (!g_environment(RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY, &save_directory) || !save_directory) {
+        log_message(RETRO_LOG_ERROR, "Winebox could not get RetroArch's save directory; configure Save Files in Settings > Directory.");
         return false;
     }
 
@@ -114,10 +117,20 @@ bool prepare_launch(const retro_game_info* game) {
     const std::filesystem::path root_archive = system_root / root_leaf;
     const std::filesystem::path projector = system_root / projector_leaf;
     const std::filesystem::path swf = std::filesystem::u8path(game->path);
-    if (!regular_file(root_archive) || !regular_file(projector) || !regular_file(swf)) {
-        log_message(RETRO_LOG_ERROR, "Required Winebox root archive, Flash projector, or SWF file is missing.");
+    if (!regular_file(root_archive)) {
+        log_message(RETRO_LOG_ERROR, ("Winebox root archive is missing or not a regular file: " + root_archive.string()).c_str());
         return false;
     }
+    if (!regular_file(projector)) {
+        log_message(RETRO_LOG_ERROR, ("Winebox Flash projector is missing or not a regular file: " + projector.string()).c_str());
+        return false;
+    }
+    if (!regular_file(swf)) {
+        log_message(RETRO_LOG_ERROR, ("Winebox SWF is missing or not a regular file: " + swf.string()).c_str());
+        return false;
+    }
+    log_message(RETRO_LOG_INFO, ("Winebox starting; root=" + root_archive.string() +
+                                 "; projector=" + projector.string() + "; swf=" + swf.string()).c_str());
 
     const std::string projector_name = projector.filename().string();
     const std::string swf_name = swf.filename().string();
@@ -127,15 +140,14 @@ bool prepare_launch(const retro_game_info* game) {
     g_save_dir = save_root.string();
     const auto projector_parent = projector.parent_path().string();
     const auto swf_parent = swf.parent_path().string();
-    const std::string guest_projector = "c:\\" + projector_name;
-    const std::string guest_swf = "d:\\" + swf_name;
+    const std::string guest_projector = "d:\\" + projector_name;
+    const std::string guest_swf = "e:\\" + swf_name;
 
-    // BoxedWine's documented -mount_drive syntax is host directory, drive
-    // letter. The save root is its writable host root; C: contains the
-    // user-provided projector, while D: exposes the selected SWF's directory.
+    // Preserve the root image's C: Wine prefix (including C:\\windows).
+    // Mount user-supplied files on D: and E: instead of shadowing that prefix.
     g_guest_args = {"winebox", "-root", g_save_dir, "-zip", root_archive.string(), "-novideo",
-                    "-mount_drive", projector_parent, "c",
-                    "-mount_drive", swf_parent, "d",
+                    "-mount_drive", projector_parent, "d",
+                    "-mount_drive", swf_parent, "e",
                     "/bin/wine", guest_projector, guest_swf};
     return true;
 }
