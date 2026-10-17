@@ -67,7 +67,7 @@ jobs:
           if ($buildExitCode -ne 0) {
             $diagnostics = $buildOutput | Select-String -Pattern "error|MSB[0-9]+|fatal" | Select-Object -Last 30
             if (-not $diagnostics) { $diagnostics = $buildOutput | Select-Object -Last 60 }
-            foreach ($line in $diagnostics) { Write-Output "::error::$line" }
+            foreach ($line in $diagnostics) { Write-Output "::error file=.github/workflows/winebox-build.yml,line=63,title=BoxedWine build diagnostic::$line" }
             exit $buildExitCode
           }
       - name: Add the Winebox MSBuild source target
@@ -112,7 +112,7 @@ jobs:
           if ($buildExitCode -ne 0) {
             $diagnostics = $buildOutput | Select-String -Pattern "error|MSB[0-9]+|fatal" | Select-Object -Last 30
             if (-not $diagnostics) { $diagnostics = $buildOutput | Select-Object -Last 60 }
-            foreach ($line in $diagnostics) { Write-Output "::error::$line" }
+            foreach ($line in $diagnostics) { Write-Output "::error file=.github/workflows/winebox-build.yml,line=100,title=Winebox core build diagnostic::$line" }
             exit $buildExitCode
           }
           $dll = Join-Path (Resolve-Path boxedwine-output).Path "winebox_libretro.dll"
