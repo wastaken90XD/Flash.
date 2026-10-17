@@ -102,7 +102,7 @@ std::uint64_t RetroHost::video_non_black_pixel_count() const {
         [](std::uint32_t pixel) { return (pixel & 0x00FFFFFFu) != 0; }));
 }
 
-bool RetroHost::present_video() {
+bool RetroHost::present_video(VideoOverlayCallback overlay, void* overlay_context, bool overlay_active) {
     if (!video_) {
         return false;
     }
@@ -127,6 +127,11 @@ bool RetroHost::present_video() {
         height = presented_height_;
     }
 
+    if (overlay && overlay_active) {
+        overlay_pixels_.assign(pixels, pixels + static_cast<std::size_t>(width) * height);
+        overlay(overlay_context, overlay_pixels_.data(), width, height);
+        pixels = overlay_pixels_.data();
+    }
     video_(pixels, width, height, static_cast<std::size_t>(width) * sizeof(std::uint32_t));
     return true;
 }

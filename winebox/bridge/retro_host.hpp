@@ -34,8 +34,11 @@ public:
     void set_input_callbacks(retro_input_poll_t poll, retro_input_state_t state) noexcept;
 
     // Called from the libretro thread. Double-buffer swapping keeps the frame
-    // stable during the callback without copying it a second time.
-    bool present_video();
+    // stable during the callback without copying it a second time. An optional
+    // frontend-thread overlay hook can draw over the stable presented frame.
+    using VideoOverlayCallback = void (*)(void*, std::uint32_t*, unsigned, unsigned);
+    bool present_video(VideoOverlayCallback overlay = nullptr, void* overlay_context = nullptr,
+                       bool overlay_active = false);
     bool video_dimensions(unsigned& width, unsigned& height) const;
     std::uint64_t video_publication_count() const noexcept;
     std::uint64_t video_publication_time_nanoseconds() const noexcept;
@@ -75,6 +78,7 @@ private:
     std::vector<std::uint32_t> video_pixels_;
     std::vector<std::uint32_t> presented_pixels_;
     std::vector<std::uint32_t> video_staging_pixels_;
+    std::vector<std::uint32_t> overlay_pixels_;
     unsigned video_width_ = 0;
     unsigned video_height_ = 0;
     unsigned presented_width_ = 0;

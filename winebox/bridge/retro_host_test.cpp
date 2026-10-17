@@ -38,6 +38,10 @@ std::int16_t RETRO_CALLCONV input_state(unsigned port, unsigned device, unsigned
     return static_cast<std::int16_t>(port + device + index + id);
 }
 
+void overlay_pixel(void*, std::uint32_t* pixels, unsigned, unsigned) {
+    pixels[0] = 0x00ABCDEF;
+}
+
 } // namespace
 
 int main() {
@@ -49,6 +53,10 @@ int main() {
     assert(late_video_host.present_video());
     assert(video_width == 1 && video_height == 1);
     assert(video_copy == std::vector<std::uint32_t>{0x00123456});
+    assert(late_video_host.present_video(overlay_pixel, nullptr, true));
+    assert(video_copy == std::vector<std::uint32_t>{0x00ABCDEF});
+    assert(late_video_host.present_video());
+    assert(video_copy == std::vector<std::uint32_t>{0x00123456}); // Overlay must not alter the guest frame.
 
     winebox::RetroHost host(video_refresh, audio_batch, input_poll, input_state, 4);
 

@@ -8,6 +8,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cctype>
 #include <cstdio>
 #include <filesystem>
 #include <memory>
@@ -87,6 +88,18 @@ bool safe_leaf_name(const std::string& value) {
     if (value.empty() || value == "." || value == "..")
         return false;
     return std::filesystem::path(value).filename() == std::filesystem::path(value);
+}
+
+std::string mapping_file_for_content(const char* path) {
+    std::string stem = path ? std::filesystem::u8path(path).stem().string() : std::string{};
+    for (char& character : stem) {
+        const auto byte = static_cast<unsigned char>(character);
+        if (!std::isalnum(byte) && character != '-' && character != '_')
+            character = '_';
+    }
+    if (stem.empty())
+        stem = "default";
+    return (std::filesystem::u8path(g_save_dir) / ("controller-" + stem + ".ini")).string();
 }
 
 bool prepare_launch(const retro_game_info* game) {
@@ -196,6 +209,11 @@ void RETRO_CALLCONV keyboard_event(bool down,
         g_input->keyboard_event(down, keycode, character, modifiers);
 }
 
+void render_input_overlay(void* context, std::uint32_t* pixels, unsigned width, unsigned height) {
+    if (context)
+        static_cast<winebox::SdlInputAdapter*>(context)->render_overlay(pixels, width, height);
+}
+
 } // namespace
 
 namespace winebox {
@@ -221,6 +239,7 @@ RETRO_API void RETRO_CALLCONV retro_set_environment(retro_environment_t callback
     static const retro_variable variables[] = {
         {"winebox_root", "Winebox root archive; TinyCore15Wine11.0.zip"},
         {"winebox_projector", "Flash projector executable; FlashPlayer.exe"},
+        {"winebox_controls", "Controller preset; Generic Keyboard|Mouse"},
         {nullptr, nullptr}
     };
     callback(RETRO_ENVIRONMENT_SET_VARIABLES, const_cast<retro_variable*>(variables));
@@ -331,10 +350,18 @@ RETRO_API void RETRO_CALLCONV retro_run(void) {
                     g_guest_exit_code == 0 ? "BoxedWine guest exited normally." : "BoxedWine guest exited with an error.");
         g_exit_reported = true;
     }
-    if (g_input)
+    if (g_input) {
+        std::string controls;
+        if (get_variable("winebox_controls", controls)) {
+            g_input->set_controller_mode(controls == "Mouse"
+                ? winebox::SdlInputAdapter::ControllerMode::Mouse
+                : winebox::SdlInputAdapter::ControllerMode::GenericKeyboard);
+        }
         g_input->poll_and_enqueue();
+    }
     const auto present_started = std::chrono::steady_clock::now();
-    g_host->present_video();
+    g_host->present_video(g_input ? render_input_overlay : nullptr, g_input.get(),
+                          g_input && g_input->overlay_active());
     g_video_stats_present_milliseconds +=
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - present_started).count();
     ++g_video_stats_present_calls;
@@ -391,6 +418,8 @@ RETRO_API bool RETRO_CALLCONV retro_load_game(const struct retro_game_info* game
         retro_init();
     if (g_game_loaded || !g_pixel_format_supported || !prepare_launch(game))
         return false;
+    if (g_input)
+        g_input->set_config_file(mapping_file_for_content(game->path));
     g_game_loaded = true;
     start_guest();
     return true;
