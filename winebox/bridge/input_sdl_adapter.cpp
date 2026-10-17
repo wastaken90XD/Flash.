@@ -94,7 +94,6 @@ SDL_Keymod modifiers_for_retro(std::uint16_t modifiers) {
     if (modifiers & RETROKMOD_META) result = static_cast<SDL_Keymod>(result | KMOD_GUI);
     if (modifiers & RETROKMOD_CAPSLOCK) result = static_cast<SDL_Keymod>(result | KMOD_CAPS);
     if (modifiers & RETROKMOD_NUMLOCK) result = static_cast<SDL_Keymod>(result | KMOD_NUM);
-    if (modifiers & RETROKMOD_SCROLLOCK) result = static_cast<SDL_Keymod>(result | KMOD_SCROLL);
     return result;
 }
 
