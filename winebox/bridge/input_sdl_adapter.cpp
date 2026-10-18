@@ -17,6 +17,7 @@ void SDL_WineboxJoystickSetEnabled(SDL_bool enabled);
 void SDL_WineboxJoystickSetAxis(int axis, Sint16 value);
 void SDL_WineboxJoystickSetButton(int button, Uint8 value);
 void SDL_WineboxJoystickSetHat(Uint8 value);
+int winebox_boxedwine_queue_input_event(const SDL_Event* event);
 }
 
 namespace winebox {
@@ -109,6 +110,11 @@ SDL_Keymod modifiers_for_retro(std::uint16_t modifiers) {
     return result;
 }
 
+void push_host_input_event(SDL_Event event) {
+    if (!winebox_boxedwine_queue_input_event(&event))
+        SDL_PushEvent(&event);
+}
+
 void push_text_input(std::uint32_t codepoint) {
     if (codepoint == 0 || codepoint > 0x10FFFF || (codepoint >= 0xD800 && codepoint <= 0xDFFF))
         return;
@@ -131,7 +137,7 @@ void push_text_input(std::uint32_t codepoint) {
         text[2] = static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F));
         text[3] = static_cast<char>(0x80 | (codepoint & 0x3F));
     }
-    SDL_PushEvent(&event);
+    push_host_input_event(event);
 }
 
 bool button(retro_input_state_t state, unsigned device, unsigned id) {
@@ -149,7 +155,7 @@ void push_key_event(bool down, unsigned key) {
     event.key.keysym.sym = symbol;
     event.key.keysym.scancode = SDL_GetScancodeFromKey(symbol);
     event.key.keysym.mod = SDL_GetModState();
-    SDL_PushEvent(&event);
+    push_host_input_event(event);
 }
 
 using OskKey = std::pair<const char*, unsigned>;
@@ -347,7 +353,7 @@ void push_mouse_motion(int x, int y, unsigned width, unsigned height) {
     event.motion.state = SDL_GetMouseState(nullptr, nullptr);
     (void)width;
     (void)height;
-    SDL_PushEvent(&event);
+    push_host_input_event(event);
 }
 
 void push_mouse_button(bool down, Uint8 button_id, int x, int y) {
@@ -358,7 +364,7 @@ void push_mouse_button(bool down, Uint8 button_id, int x, int y) {
     event.button.clicks = 1;
     event.button.x = x;
     event.button.y = y;
-    SDL_PushEvent(&event);
+    push_host_input_event(event);
 }
 
 } // namespace
@@ -969,13 +975,13 @@ void SdlInputAdapter::poll_and_enqueue() {
         SDL_Event event{};
         event.type = SDL_MOUSEWHEEL;
         event.wheel.y = 1;
-        SDL_PushEvent(&event);
+        push_host_input_event(event);
     }
     if (overlay_closed && (mapped_wheel_down || button(state_, RETRO_DEVICE_MOUSE, RETRO_DEVICE_ID_MOUSE_WHEELDOWN))) {
         SDL_Event event{};
         event.type = SDL_MOUSEWHEEL;
         event.wheel.y = -1;
-        SDL_PushEvent(&event);
+        push_host_input_event(event);
     }
 }
 

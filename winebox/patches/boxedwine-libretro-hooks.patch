@@ -410,3 +410,53 @@ index 95aac9c..7a20d56 100644
  };
  static SDL_bool SDL_joystick_allows_background_events = SDL_FALSE;
  static SDL_Joystick *SDL_joysticks = NULL;
+diff --git a/platform/sdl/knativeinputSDL.cpp b/platform/sdl/knativeinputSDL.cpp
+index fa70c79..fdf30bc 100644
+--- a/platform/sdl/knativeinputSDL.cpp
++++ b/platform/sdl/knativeinputSDL.cpp
+@@ -24,6 +24,32 @@
+ #include "knativeinputSDL.h"
+ #include "knativesystem.h"
+ #include "kdspaudio.h"
++#ifdef BOXEDWINE_LIBRETRO
++#include <deque>
++#include <mutex>
++
++namespace {
++std::mutex wineboxInputQueueMutex;
++std::deque<SDL_Event> wineboxInputQueue;
++constexpr std::size_t wineboxInputQueueLimit = 1024;
++}
++
++extern "C" int winebox_boxedwine_queue_input_event(const SDL_Event* event) {
++    if (!event) return 0;
++    std::lock_guard<std::mutex> lock(wineboxInputQueueMutex);
++    if (wineboxInputQueue.size() >= wineboxInputQueueLimit) return 0;
++    wineboxInputQueue.push_back(*event);
++    return 1;
++}
++
++static bool wineboxPopInputEvent(SDL_Event* event) {
++    std::lock_guard<std::mutex> lock(wineboxInputQueueMutex);
++    if (wineboxInputQueue.empty()) return false;
++    *event = wineboxInputQueue.front();
++    wineboxInputQueue.pop_front();
++    return true;
++}
++#endif
+ 
+ #ifdef __APPLE__
+ #include "../mac/macCursor.h"
+@@ -670,6 +696,12 @@ bool KNativeInputSDL::processEvents() {
+ #endif
+ 
+     while (true) {
++#ifdef BOXEDWINE_LIBRETRO
++        if (wineboxPopInputEvent(&e)) {
++            if (!handlSdlEvent(&e)) return false;
++            continue;
++        }
++#endif
+         if (SDL_PollEvent(&e) != 1) {
+ #if defined(__EMSCRIPTEN__) && defined(BOXEDWINE_MULTI_THREADED)
+             if (customCount && KSystem::getMicroCounter() - customStart < 8000) {
