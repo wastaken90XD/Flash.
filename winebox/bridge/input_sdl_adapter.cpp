@@ -407,10 +407,10 @@ void SdlInputAdapter::load_default_mapping() {
     for (auto& actions : mapping_)
         actions.fill(0);
     const std::array<unsigned, 24> defaults = {RETROK_LCTRL, RETROK_LSHIFT, RETROK_ESCAPE, RETROK_RETURN,
-        RETROK_UP, RETROK_DOWN, RETROK_LEFT, RETROK_RIGHT, RETROK_LALT, RETROK_SPACE,
+        RETROK_w, RETROK_s, RETROK_a, RETROK_d, RETROK_LALT, RETROK_SPACE,
         RETROK_1, RETROK_2, RETROK_3, RETROK_4, 0, RETROK_F2,
-        RETROK_LEFT, RETROK_RIGHT, RETROK_UP, RETROK_DOWN,
-        RETROK_HOME, RETROK_END, RETROK_PAGEUP, RETROK_PAGEDOWN};
+        RETROK_a, RETROK_d, RETROK_w, RETROK_s,
+        RETROK_LEFT, RETROK_RIGHT, RETROK_UP, RETROK_DOWN};
     for (std::size_t source = 0; source < defaults.size(); ++source)
         mapping_[source][0] = defaults[source];
 }
