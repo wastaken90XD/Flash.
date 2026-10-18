@@ -330,6 +330,63 @@ const std::vector<OskKey>& osk_keys(bool include_actions = false) {
     return include_actions ? full_options : keys;
 }
 
+constexpr unsigned kOskMapperButton = kActionJoyHatRight + 1;
+struct OskCell { const char* label; unsigned key; unsigned units; };
+using OskRow = std::vector<OskCell>;
+
+const std::vector<OskRow>& osk_layout() {
+    static const std::vector<OskRow> rows = {
+        {{"ESC", RETROK_ESCAPE, 2}, {"F1", RETROK_F1, 1}, {"F2", RETROK_F2, 1},
+         {"F3", RETROK_F3, 1}, {"F4", RETROK_F4, 1}, {"F5", RETROK_F5, 1},
+         {"F6", RETROK_F6, 1}, {"F7", RETROK_F7, 1}, {"F8", RETROK_F8, 1},
+         {"F9", RETROK_F9, 1}, {"F10", RETROK_F10, 1}, {"F11", RETROK_F11, 1},
+         {"F12", RETROK_F12, 1}, {"PAD MAPPER", kOskMapperButton, 3}},
+        {{"1", RETROK_1, 1}, {"2", RETROK_2, 1}, {"3", RETROK_3, 1}, {"4", RETROK_4, 1},
+         {"5", RETROK_5, 1}, {"6", RETROK_6, 1}, {"7", RETROK_7, 1}, {"8", RETROK_8, 1},
+         {"9", RETROK_9, 1}, {"0", RETROK_0, 1}, {"-", RETROK_MINUS, 1}, {"=", RETROK_EQUALS, 1},
+         {"BACKSPACE", RETROK_BACKSPACE, 2}},
+        {{"TAB", RETROK_TAB, 2}, {"Q", RETROK_q, 1}, {"W", RETROK_w, 1}, {"E", RETROK_e, 1},
+         {"R", RETROK_r, 1}, {"T", RETROK_t, 1}, {"Y", RETROK_y, 1}, {"U", RETROK_u, 1},
+         {"I", RETROK_i, 1}, {"O", RETROK_o, 1}, {"P", RETROK_p, 1}, {"[", RETROK_LEFTBRACKET, 1},
+         {"]", RETROK_RIGHTBRACKET, 1}, {"\\", RETROK_BACKSLASH, 1}},
+        {{"CAPS", RETROK_CAPSLOCK, 2}, {"A", RETROK_a, 1}, {"S", RETROK_s, 1}, {"D", RETROK_d, 1},
+         {"F", RETROK_f, 1}, {"G", RETROK_g, 1}, {"H", RETROK_h, 1}, {"J", RETROK_j, 1},
+         {"K", RETROK_k, 1}, {"L", RETROK_l, 1}, {";", RETROK_SEMICOLON, 1}, {"'", RETROK_QUOTE, 1},
+         {"ENTER", RETROK_RETURN, 2}},
+        {{"SHIFT", RETROK_LSHIFT, 2}, {"Z", RETROK_z, 1}, {"X", RETROK_x, 1}, {"C", RETROK_c, 1},
+         {"V", RETROK_v, 1}, {"B", RETROK_b, 1}, {"N", RETROK_n, 1}, {"M", RETROK_m, 1},
+         {",", RETROK_COMMA, 1}, {".", RETROK_PERIOD, 1}, {"/", RETROK_SLASH, 1}, {"SHIFT", RETROK_RSHIFT, 2}},
+        {{"CTRL", RETROK_LCTRL, 2}, {"ALT", RETROK_LALT, 2}, {"SPACE", RETROK_SPACE, 5},
+         {"ALT", RETROK_RALT, 2}, {"CTRL", RETROK_RCTRL, 2}, {"LEFT", RETROK_LEFT, 1},
+         {"DOWN", RETROK_DOWN, 1}, {"UP", RETROK_UP, 1}, {"RIGHT", RETROK_RIGHT, 1}},
+        {{"INS", RETROK_INSERT, 1}, {"HOME", RETROK_HOME, 1}, {"PGUP", RETROK_PAGEUP, 1},
+         {"DEL", RETROK_DELETE, 1}, {"END", RETROK_END, 1}, {"PGDN", RETROK_PAGEDOWN, 1},
+         {"PRINT", RETROK_PRINT, 1}, {"PAUSE", RETROK_PAUSE, 1}, {"NUM", RETROK_NUMLOCK, 1},
+         {"KP /", RETROK_KP_DIVIDE, 1}, {"KP *", RETROK_KP_MULTIPLY, 1}, {"KP -", RETROK_KP_MINUS, 1}},
+        {{"KP 7", RETROK_KP7, 1}, {"KP 8", RETROK_KP8, 1}, {"KP 9", RETROK_KP9, 1},
+         {"KP +", RETROK_KP_PLUS, 1}, {"KP 4", RETROK_KP4, 1}, {"KP 5", RETROK_KP5, 1},
+         {"KP 6", RETROK_KP6, 1}, {"KP 1", RETROK_KP1, 1}, {"KP 2", RETROK_KP2, 1},
+         {"KP 3", RETROK_KP3, 1}, {"KP 0", RETROK_KP0, 2}, {"KP .", RETROK_KP_PERIOD, 1},
+         {"KP ENTER", RETROK_KP_ENTER, 2}}
+    };
+    return rows;
+}
+
+std::vector<unsigned> assign_options(unsigned category) {
+    std::vector<unsigned> result{0};
+    for (const auto& entry : osk_keys(true)) {
+        const unsigned value = entry.second;
+        if (!value)
+            continue;
+        const bool keyboard = value < RETROK_LAST;
+        const bool mouse = value >= kActionMouseLeft && value <= kActionMouseSpeedDown;
+        const bool joystick = value >= kActionJoy1AxisLeft && value <= kActionJoyHatRight;
+        if ((category == 0 && keyboard) || (category == 1 && mouse) || (category == 2 && joystick))
+            result.push_back(value);
+    }
+    return result;
+}
+
 std::array<std::uint8_t, 5> glyph(char c) {
     switch (c) {
     case 'A': return {7,5,7,5,5}; case 'B': return {6,5,6,5,6}; case 'C': return {7,4,4,4,7};
@@ -413,6 +470,52 @@ std::string action_name(unsigned target) {
     if (target >= RETROK_F1 && target <= RETROK_F12)
         return "F" + std::to_string(target - RETROK_F1 + 1);
     return "KEY";
+}
+
+struct UiRect { int x, y, w, h; };
+void draw_text(std::uint32_t* pixels, unsigned width, unsigned height, int x, int y,
+               const std::string& text, std::uint32_t color, int scale);
+
+UiRect ui_panel(unsigned width, unsigned height) {
+    const int margin = std::max(8, static_cast<int>(std::min(width, height)) / 40);
+    return {margin, margin, std::max(1, static_cast<int>(width) - margin * 2),
+            std::max(1, static_cast<int>(height) - margin * 2)};
+}
+
+UiRect ui_tabs(const UiRect& panel) {
+    return {panel.x + 12, panel.y + 10, panel.w - 24, std::max(28, panel.h / 12)};
+}
+
+UiRect ui_content(const UiRect& panel) {
+    const UiRect tabs = ui_tabs(panel);
+    return {panel.x + 14, tabs.y + tabs.h + 10, panel.w - 28,
+            std::max(1, panel.h - (tabs.y - panel.y) - tabs.h - 34)};
+}
+
+UiRect ui_touch_trigger(unsigned width, unsigned height) {
+    constexpr int trigger_w = 88, trigger_h = 34, margin = 8;
+    return {std::max(0, static_cast<int>(width) - trigger_w - margin),
+            std::max(0, static_cast<int>(height) - trigger_h - margin), trigger_w, trigger_h};
+}
+
+void draw_ui_button(std::uint32_t* pixels, unsigned width, unsigned height,
+                    const UiRect& r, const std::string& label, bool selected,
+                    int scale = 2) {
+    const std::uint32_t fill = selected ? 0x003C2A15u : 0x001A222Bu;
+    const std::uint32_t edge = selected ? 0x00FFB23Fu : 0x00485A6Au;
+    draw_rect(pixels, width, height, r.x, r.y, r.w, r.h, fill);
+    draw_rect(pixels, width, height, r.x, r.y, r.w, 2, edge);
+    draw_rect(pixels, width, height, r.x, r.y, 2, r.h, edge);
+    draw_rect(pixels, width, height, r.x, r.y + r.h - 2, r.w, 2, 0x00080C10u);
+    draw_rect(pixels, width, height, r.x + r.w - 2, r.y, 2, r.h, 0x00080C10u);
+    const int max_chars = std::max(1, (r.w - 12) / (4 * scale));
+    std::string text = label;
+    if (static_cast<int>(text.size()) > max_chars)
+        text.resize(static_cast<std::size_t>(max_chars));
+    const int tw = static_cast<int>(text.size()) * 4 * scale;
+    draw_text(pixels, width, height, r.x + std::max(5, (r.w - tw) / 2),
+              r.y + std::max(3, (r.h - 5 * scale) / 2), text,
+              selected ? 0x00FFF0D3u : 0x00D6DFE7u, scale);
 }
 
 void draw_text(std::uint32_t* pixels, unsigned width, unsigned height, int x, int y,
@@ -605,7 +708,8 @@ void SdlInputAdapter::sync_all_key_states() {
 }
 
 void SdlInputAdapter::handle_overlay_input(const std::array<bool, 16>& buttons,
-                                           const std::array<std::int16_t, 4>& axes) {
+                                           const std::array<std::int16_t, 4>& axes,
+                                           bool touch_pressed, int touch_x, int touch_y) {
     const bool was_closed = overlay_mode_ == OverlayMode::Closed;
     const bool was_open = !was_closed;
     std::array<bool, 16> pressed{};
@@ -613,91 +717,222 @@ void SdlInputAdapter::handle_overlay_input(const std::array<bool, 16>& buttons,
         pressed[i] = buttons[i] && !ui_button_previous_[i];
     const std::array<bool, 4> axis_active = {axes[0] < -12000, axes[0] > 12000,
                                              axes[1] < -12000, axes[1] > 12000};
-    const bool nav_left = pressed[RETRO_DEVICE_ID_JOYPAD_LEFT] || (axis_active[0] && !ui_axis_previous_[0]);
-    const bool nav_right = pressed[RETRO_DEVICE_ID_JOYPAD_RIGHT] || (axis_active[1] && !ui_axis_previous_[1]);
-    const bool nav_up = pressed[RETRO_DEVICE_ID_JOYPAD_UP] || (axis_active[2] && !ui_axis_previous_[2]);
-    const bool nav_down = pressed[RETRO_DEVICE_ID_JOYPAD_DOWN] || (axis_active[3] && !ui_axis_previous_[3]);
-    const bool accept = pressed[RETRO_DEVICE_ID_JOYPAD_A] || pressed[RETRO_DEVICE_ID_JOYPAD_START];
-    const bool cancel = pressed[RETRO_DEVICE_ID_JOYPAD_B] || pressed[RETRO_DEVICE_ID_JOYPAD_SELECT];
+    bool nav_left = pressed[RETRO_DEVICE_ID_JOYPAD_LEFT] || (axis_active[0] && !ui_axis_previous_[0]);
+    bool nav_right = pressed[RETRO_DEVICE_ID_JOYPAD_RIGHT] || (axis_active[1] && !ui_axis_previous_[1]);
+    bool nav_up = pressed[RETRO_DEVICE_ID_JOYPAD_UP] || (axis_active[2] && !ui_axis_previous_[2]);
+    bool nav_down = pressed[RETRO_DEVICE_ID_JOYPAD_DOWN] || (axis_active[3] && !ui_axis_previous_[3]);
+    bool accept = pressed[RETRO_DEVICE_ID_JOYPAD_A] || pressed[RETRO_DEVICE_ID_JOYPAD_START];
+    bool cancel = pressed[RETRO_DEVICE_ID_JOYPAD_B] || pressed[RETRO_DEVICE_ID_JOYPAD_SELECT];
+    const bool touch_click = touch_pressed && !ui_pointer_previous_;
+    bool touch_accept = false;
 
     if (overlay_mode_ == OverlayMode::Closed) {
         if (pressed[RETRO_DEVICE_ID_JOYPAD_L3]) {
             overlay_mode_ = OverlayMode::Menu;
             menu_selection_ = 0;
+        } else if (touch_click) {
+            const UiRect trigger = ui_touch_trigger(width_, height_);
+            if (touch_x >= trigger.x && touch_x < trigger.x + trigger.w &&
+                touch_y >= trigger.y && touch_y < trigger.y + trigger.h) {
+                overlay_mode_ = OverlayMode::Menu;
+                menu_selection_ = 0;
+            }
         }
-    } else if (overlay_mode_ == OverlayMode::Menu) {
+    } else if (pressed[RETRO_DEVICE_ID_JOYPAD_L3]) {
+        overlay_mode_ = OverlayMode::Closed;
+    }
+
+    if (touch_click && overlay_mode_ != OverlayMode::Closed) {
+        const UiRect panel = ui_panel(width_, height_);
+        const UiRect tabs = ui_tabs(panel);
+        const UiRect content = ui_content(panel);
+        if (touch_y >= tabs.y && touch_y < tabs.y + tabs.h &&
+            touch_x >= tabs.x && touch_x < tabs.x + tabs.w) {
+            const unsigned tab = std::min(2u, static_cast<unsigned>(touch_x - tabs.x) * 3u /
+                                               static_cast<unsigned>(std::max(1, tabs.w)));
+            overlay_mode_ = tab == 0 ? OverlayMode::Menu : tab == 1 ? OverlayMode::Keyboard : OverlayMode::Mapper;
+            if (overlay_mode_ == OverlayMode::Menu) menu_selection_ = 0;
+            if (overlay_mode_ == OverlayMode::Keyboard) keyboard_selection_ = 0;
+        } else if (overlay_mode_ == OverlayMode::Menu) {
+            const int row_h = std::max(1, content.h / 3);
+            menu_selection_ = std::min(2u, static_cast<unsigned>(std::max(0, touch_y - content.y) / row_h));
+            touch_accept = true;
+        } else if (overlay_mode_ == OverlayMode::Mapper) {
+            const unsigned columns = height_ < 400 ? 4u : 3u;
+            const unsigned rows = 24u / columns;
+            const int top = content.y + 38;
+            const int row_h = std::max(1, (content.h - 44 - static_cast<int>(rows - 1) * 6) / static_cast<int>(rows));
+            const int col_w = std::max(1, content.w / static_cast<int>(columns));
+            const unsigned row = std::min(rows - 1, static_cast<unsigned>(std::max(0, touch_y - top) / row_h));
+            const unsigned col = std::min(columns - 1, static_cast<unsigned>(std::max(0, touch_x - content.x) / col_w));
+            selected_control_ = std::min(23u, row * columns + col);
+            touch_accept = true;
+        } else if (overlay_mode_ == OverlayMode::MapperSlots) {
+            const int top = content.y + 58;
+            const int row_h = std::max(1, (content.h - 68 - 3 * 8) / 4);
+            selected_action_slot_ = std::min(3u, static_cast<unsigned>(std::max(0, touch_y - top) / row_h));
+            touch_accept = true;
+        } else if (overlay_mode_ == OverlayMode::Keyboard) {
+            const auto& rows = osk_layout();
+            const int top = content.y + 6;
+            const int row_h = std::max(1, (content.h - 12) / static_cast<int>(rows.size()));
+            if (touch_y >= top && touch_y < top + row_h * static_cast<int>(rows.size())) {
+                const unsigned row = std::min(static_cast<unsigned>(rows.size() - 1),
+                    static_cast<unsigned>((touch_y - top) / row_h));
+                unsigned units = 0;
+                for (const OskCell& cell : rows[row]) units += cell.units;
+                const int unit_w = std::max(1, content.w / static_cast<int>(units));
+                int x = content.x;
+                unsigned flat = 0;
+                for (unsigned r = 0; r < row; ++r) flat += static_cast<unsigned>(rows[r].size());
+                for (const OskCell& cell : rows[row]) {
+                    const int w = unit_w * static_cast<int>(cell.units);
+                    if (touch_x >= x && touch_x < x + w) {
+                        keyboard_selection_ = flat;
+                        touch_accept = true;
+                        break;
+                    }
+                    x += w;
+                    ++flat;
+                }
+            }
+        } else if (overlay_mode_ == OverlayMode::AssignKeyboard) {
+            const int tab_h = 42;
+            if (touch_y >= content.y && touch_y < content.y + tab_h) {
+                assign_category_ = std::min(2u, static_cast<unsigned>(std::max(0, touch_x - content.x)) * 3u /
+                                                   static_cast<unsigned>(std::max(1, content.w)));
+                keyboard_selection_ = 0;
+            } else {
+                const auto options = assign_options(assign_category_);
+                constexpr unsigned columns = 5;
+                const int grid_y = content.y + tab_h + 6;
+                const int cell_h = 42;
+                const unsigned visible_rows = std::max(1, (content.h - tab_h - 12) / cell_h);
+                const unsigned total_rows = static_cast<unsigned>((options.size() + columns - 1) / columns);
+                const unsigned selected_row = keyboard_selection_ / columns;
+                const unsigned first_row = std::min(total_rows > visible_rows ? total_rows - visible_rows : 0,
+                    selected_row > visible_rows / 2 ? selected_row - visible_rows / 2 : 0);
+                const unsigned row = first_row + std::min(visible_rows - 1,
+                    static_cast<unsigned>(std::max(0, touch_y - grid_y) / cell_h));
+                const unsigned col = std::min(columns - 1,
+                    static_cast<unsigned>(std::max(0, touch_x - content.x)) * columns /
+                    static_cast<unsigned>(std::max(1, content.w)));
+                const unsigned index = row * columns + col;
+                if (index < options.size()) {
+                    keyboard_selection_ = index;
+                    touch_accept = true;
+                }
+            }
+        }
+    }
+
+    if (overlay_mode_ == OverlayMode::Menu) {
         if (nav_up) menu_selection_ = (menu_selection_ + 2) % 3;
         if (nav_down) menu_selection_ = (menu_selection_ + 1) % 3;
         if (cancel) overlay_mode_ = OverlayMode::Closed;
-        if (accept) {
-            if (menu_selection_ == 0) overlay_mode_ = OverlayMode::Mapper;
-            else if (menu_selection_ == 1) overlay_mode_ = OverlayMode::Keyboard;
-            else overlay_mode_ = OverlayMode::Closed;
+        if (accept || touch_accept) {
+            if (menu_selection_ == 0) overlay_mode_ = OverlayMode::Closed;
+            else if (menu_selection_ == 1) overlay_mode_ = OverlayMode::Mapper;
+            else overlay_mode_ = OverlayMode::Keyboard;
         }
     } else if (overlay_mode_ == OverlayMode::Mapper) {
-        if (nav_up) selected_control_ = (selected_control_ + 23) % 24;
-        if (nav_down) selected_control_ = (selected_control_ + 1) % 24;
+        if (pressed[RETRO_DEVICE_ID_JOYPAD_L]) overlay_mode_ = OverlayMode::Keyboard;
+        if (pressed[RETRO_DEVICE_ID_JOYPAD_R]) overlay_mode_ = OverlayMode::Keyboard;
+        const unsigned columns = height_ < 400 ? 4u : 3u;
+        const unsigned column = selected_control_ % columns;
+        const unsigned row_start = (selected_control_ / columns) * columns;
+        if (nav_left) selected_control_ = row_start + (column + columns - 1) % columns;
+        if (nav_right) selected_control_ = row_start + (column + 1) % columns;
+        if (nav_up) selected_control_ = (selected_control_ + 24 - columns) % 24;
+        if (nav_down) selected_control_ = (selected_control_ + columns) % 24;
         if (cancel) overlay_mode_ = OverlayMode::Menu;
-        if (accept && selected_control_ != RETRO_DEVICE_ID_JOYPAD_L3)
+        if ((accept || touch_accept) && selected_control_ != RETRO_DEVICE_ID_JOYPAD_L3) {
             overlay_mode_ = OverlayMode::MapperSlots;
+            selected_action_slot_ = 0;
+        }
     } else if (overlay_mode_ == OverlayMode::MapperSlots) {
         if (nav_up) selected_action_slot_ = (selected_action_slot_ + 3) % 4;
         if (nav_down) selected_action_slot_ = (selected_action_slot_ + 1) % 4;
         if (cancel) overlay_mode_ = OverlayMode::Mapper;
-        if (accept) {
+        if (pressed[RETRO_DEVICE_ID_JOYPAD_X]) {
+            mapping_[selected_control_][selected_action_slot_] = 0;
+            save_mapping();
+            sync_virtual_joystick();
+        }
+        if (accept || touch_accept) {
             overlay_mode_ = OverlayMode::AssignKeyboard;
             keyboard_selection_ = 0;
+            assign_category_ = 0;
         }
-    } else {
-        const bool assigning = overlay_mode_ == OverlayMode::AssignKeyboard;
-        const auto& options = osk_keys(assigning);
-        const unsigned key_count = static_cast<unsigned>(options.size());
-        if (nav_up) keyboard_selection_ = (keyboard_selection_ + key_count - 8) % key_count;
-        if (nav_down) keyboard_selection_ = (keyboard_selection_ + 8) % key_count;
-        if (nav_left) keyboard_selection_ = (keyboard_selection_ + key_count - 1) % key_count;
-        if (nav_right) keyboard_selection_ = (keyboard_selection_ + 1) % key_count;
-        if (cancel) {
-            if (osk_latched_modifier_) {
-                const unsigned modifier = osk_latched_modifier_;
-                osk_latched_modifier_ = 0;
-                update_sdl_modifiers();
-                push_key_event(false, modifier);
+    } else if (overlay_mode_ == OverlayMode::Keyboard) {
+        if (pressed[RETRO_DEVICE_ID_JOYPAD_L]) overlay_mode_ = OverlayMode::Menu;
+        if (pressed[RETRO_DEVICE_ID_JOYPAD_R]) overlay_mode_ = OverlayMode::Mapper;
+        const auto& rows = osk_layout();
+        unsigned row = 0, col = keyboard_selection_;
+        while (row + 1 < rows.size() && col >= rows[row].size()) {
+            col -= static_cast<unsigned>(rows[row].size());
+            ++row;
+        }
+        if (nav_left) col = (col + static_cast<unsigned>(rows[row].size()) - 1) % static_cast<unsigned>(rows[row].size());
+        if (nav_right) col = (col + 1) % static_cast<unsigned>(rows[row].size());
+        if (nav_up || nav_down) {
+            const unsigned next_row = nav_up ? (row + static_cast<unsigned>(rows.size()) - 1) % static_cast<unsigned>(rows.size())
+                                             : (row + 1) % static_cast<unsigned>(rows.size());
+            col = std::min(col, static_cast<unsigned>(rows[next_row].size() - 1));
+            row = next_row;
+        }
+        keyboard_selection_ = col;
+        for (unsigned r = 0; r < row; ++r) keyboard_selection_ += static_cast<unsigned>(rows[r].size());
+        if (cancel) overlay_mode_ = OverlayMode::Menu;
+        if (accept || touch_accept) {
+            unsigned flat = 0;
+            const OskCell* selected = nullptr;
+            for (const OskRow& line : rows) {
+                if (keyboard_selection_ < flat + line.size()) {
+                    selected = &line[keyboard_selection_ - flat];
+                    break;
+                }
+                flat += static_cast<unsigned>(line.size());
             }
-            overlay_mode_ = assigning ? OverlayMode::MapperSlots : OverlayMode::Menu;
-        }
-        if (accept) {
-            const unsigned key = options[keyboard_selection_].second;
-            if (assigning) {
-                mapping_[selected_control_][selected_action_slot_] = key;
-                save_mapping();
-                sync_virtual_joystick();
-                overlay_mode_ = OverlayMode::MapperSlots;
-            } else if (key < RETROK_LAST && (key == RETROK_LSHIFT || key == RETROK_LCTRL || key == RETROK_LALT)) {
-                if (osk_latched_modifier_ == key) {
-                    osk_latched_modifier_ = 0;
-                    update_sdl_modifiers();
-                    push_key_event(false, key);
-                } else {
-                    if (osk_latched_modifier_) {
-                        const unsigned old_modifier = osk_latched_modifier_;
+            if (selected && selected->key == kOskMapperButton) {
+                overlay_mode_ = OverlayMode::Mapper;
+            } else if (selected && selected->key) {
+                if (selected->key == RETROK_LSHIFT || selected->key == RETROK_RSHIFT ||
+                    selected->key == RETROK_LCTRL || selected->key == RETROK_RCTRL ||
+                    selected->key == RETROK_LALT || selected->key == RETROK_RALT) {
+                    const unsigned key = selected->key;
+                    if (osk_latched_modifier_ == key) {
                         osk_latched_modifier_ = 0;
                         update_sdl_modifiers();
-                        push_key_event(false, old_modifier);
+                        push_key_event(false, key);
+                    } else {
+                        if (osk_latched_modifier_) push_key_event(false, osk_latched_modifier_);
+                        osk_latched_modifier_ = key;
+                        update_sdl_modifiers();
+                        push_key_event(true, key);
                     }
-                    osk_latched_modifier_ = key;
-                    update_sdl_modifiers();
-                    push_key_event(true, key);
-                }
-            } else if (key) {
-                push_key_event(true, key);
-                push_key_event(false, key);
-                if (osk_latched_modifier_) {
-                    const unsigned modifier = osk_latched_modifier_;
-                    osk_latched_modifier_ = 0;
-                    update_sdl_modifiers();
-                    push_key_event(false, modifier);
+                } else {
+                    push_key_event(true, selected->key);
+                    push_key_event(false, selected->key);
                 }
             }
+        }
+    } else if (overlay_mode_ == OverlayMode::AssignKeyboard) {
+        if (pressed[RETRO_DEVICE_ID_JOYPAD_L]) assign_category_ = (assign_category_ + 2) % 3;
+        if (pressed[RETRO_DEVICE_ID_JOYPAD_R]) assign_category_ = (assign_category_ + 1) % 3;
+        const auto options = assign_options(assign_category_);
+        const unsigned count = static_cast<unsigned>(options.size());
+        constexpr unsigned columns = 5;
+        if (nav_left) keyboard_selection_ = (keyboard_selection_ + count - 1) % count;
+        if (nav_right) keyboard_selection_ = (keyboard_selection_ + 1) % count;
+        if (nav_up) keyboard_selection_ = (keyboard_selection_ + count - std::min(columns, count)) % count;
+        if (nav_down) keyboard_selection_ = (keyboard_selection_ + std::min(columns, count)) % count;
+        if (cancel) overlay_mode_ = OverlayMode::MapperSlots;
+        if (accept || touch_accept) {
+            mapping_[selected_control_][selected_action_slot_] = options[keyboard_selection_];
+            save_mapping();
+            sync_virtual_joystick();
+            overlay_mode_ = OverlayMode::MapperSlots;
         }
     }
     if (was_open && overlay_mode_ == OverlayMode::Closed) {
@@ -709,13 +944,12 @@ void SdlInputAdapter::handle_overlay_input(const std::array<bool, 16>& buttons,
         }
     }
     if (was_closed && overlay_mode_ != OverlayMode::Closed) {
-        for (std::size_t key = 0; key < key_down_.size(); ++key) {
-            key_down_[key] = false;
-            callback_key_down_[key] = false;
-        }
+        key_down_.fill(false);
+        callback_key_down_.fill(false);
     }
     ui_button_previous_ = buttons;
     ui_axis_previous_ = axis_active;
+    ui_pointer_previous_ = touch_pressed;
 }
 
 bool SdlInputAdapter::overlay_active() const noexcept {
@@ -723,114 +957,188 @@ bool SdlInputAdapter::overlay_active() const noexcept {
 }
 
 void SdlInputAdapter::render_overlay(std::uint32_t* pixels, unsigned width, unsigned height) const {
-    if (!pixels || !width || !height || overlay_mode_ == OverlayMode::Closed)
+    if (!pixels || !width || !height)
         return;
-    const int panel_w = std::min(static_cast<int>(width) - 16, 620);
-    const int panel_h = std::min(static_cast<int>(height) - 16, overlay_mode_ == OverlayMode::Keyboard || overlay_mode_ == OverlayMode::AssignKeyboard ? 440 : 270);
-    if (panel_w < 100 || panel_h < 100)
+    if (overlay_mode_ == OverlayMode::Closed) {
+        const UiRect trigger = ui_touch_trigger(width, height);
+        draw_ui_button(pixels, width, height, trigger, "MENU", false, 1);
         return;
-    const int left = (static_cast<int>(width) - panel_w) / 2;
-    const int top = (static_cast<int>(height) - panel_h) / 2;
-    draw_rect(pixels, width, height, left, top, panel_w, panel_h, 0x00131D2Au);
-    draw_rect(pixels, width, height, left, top, panel_w, 3, 0x0000B8D4u);
-    draw_rect(pixels, width, height, left, top + panel_h - 3, panel_w, 3, 0x0000B8D4u);
-    draw_rect(pixels, width, height, left, top, 3, panel_h, 0x0000B8D4u);
-    draw_rect(pixels, width, height, left + panel_w - 3, top, 3, panel_h, 0x0000B8D4u);
+    }
 
-    std::string title = "WINEBOX CONTROLS";
-    if (overlay_mode_ == OverlayMode::Mapper) title = "CONTROLLER MAPPER";
-    else if (overlay_mode_ == OverlayMode::MapperSlots) title = "BINDING ACTIONS";
-    else if (overlay_mode_ == OverlayMode::Keyboard) title = "ON SCREEN KEYBOARD";
-    else if (overlay_mode_ == OverlayMode::AssignKeyboard) title = "ASSIGN ACTION TO CONTROL";
-    draw_text(pixels, width, height, left + 18, top + 14, title, 0x00FFFFFFu, 2);
+    const UiRect panel = ui_panel(width, height);
+    const UiRect tabs = ui_tabs(panel);
+    const UiRect content = ui_content(panel);
+    draw_rect(pixels, width, height, panel.x, panel.y, panel.w, panel.h, 0x00090D12u);
+    draw_rect(pixels, width, height, panel.x, panel.y, panel.w, 3, 0x00C77C28u);
+    draw_rect(pixels, width, height, panel.x, panel.y, 3, panel.h, 0x00C77C28u);
+    draw_rect(pixels, width, height, panel.x, panel.y + panel.h - 3, panel.w, 3, 0x00C77C28u);
+    draw_rect(pixels, width, height, panel.x + panel.w - 3, panel.y, 3, panel.h, 0x00C77C28u);
+
+    const std::array<const char*, 3> tab_labels = {"START MENU", "ON-SCREEN KEYBOARD", "CONTROLLER MAPPER"};
+    const unsigned active_tab = (overlay_mode_ == OverlayMode::Keyboard) ? 1
+        : (overlay_mode_ == OverlayMode::Mapper || overlay_mode_ == OverlayMode::MapperSlots ||
+           overlay_mode_ == OverlayMode::AssignKeyboard) ? 2 : 0;
+    const int tab_w = tabs.w / 3;
+    for (unsigned i = 0; i < tab_labels.size(); ++i) {
+        const UiRect r{tabs.x + static_cast<int>(i) * tab_w, tabs.y,
+                       i == 2 ? tabs.w - 2 * tab_w : tab_w - 4, tabs.h};
+        draw_ui_button(pixels, width, height, r, tab_labels[i], i == active_tab, 1);
+    }
+
+    const int footer_y = panel.y + panel.h - 27;
+    draw_rect(pixels, width, height, panel.x + 8, footer_y - 4, panel.w - 16, 1, 0x00475A6A);
+    std::string footer = "D-PAD / STICK NAVIGATE     A SELECT     B BACK     TAP TO SELECT";
+    if (overlay_mode_ == OverlayMode::Keyboard)
+        footer = "A TYPE     B BACK     L/R CHANGE TAB     TOUCH ANY KEY";
+    else if (overlay_mode_ == OverlayMode::MapperSlots)
+        footer = "A REBIND     X CLEAR     B BACK     TAP A BINDING";
+    else if (overlay_mode_ == OverlayMode::AssignKeyboard)
+        footer = "A ASSIGN     L/R CATEGORY     B CANCEL     TAP A TARGET";
+    draw_text(pixels, width, height, panel.x + 14, footer_y + 7, footer, 0x00AFC0CCu, 1);
 
     if (overlay_mode_ == OverlayMode::Menu) {
-        const std::array<const char*, 3> labels = {"CONTROLLER MAPPER", "ON SCREEN KEYBOARD", "CLOSE MENU"};
+        const bool compact = height < 400;
+        draw_text(pixels, width, height, content.x + 8, content.y + 5,
+                  "WINEBOX CONTROL CENTER", 0x00F4A94Au, compact ? 1 : 2);
+        const std::array<const char*, 3> labels = {"RESUME GAME", "CONTROLLER MAPPER", "ON-SCREEN KEYBOARD"};
+        const int gap = std::max(4, content.h / 36);
+        const int top = content.y + (compact ? 24 : 52);
+        const int row_h = std::max(compact ? 25 : 38, (content.h - (compact ? 30 : 62) - 2 * gap) / 3);
         for (unsigned i = 0; i < labels.size(); ++i) {
-            const int y = top + 66 + static_cast<int>(i) * 46;
-            draw_rect(pixels, width, height, left + 16, y - 5, panel_w - 32, 34,
-                      i == menu_selection_ ? 0x00304458u : 0x001B2835u);
-            draw_text(pixels, width, height, left + 28, y + 3, labels[i], 0x00FFFFFFu, 2);
+            const UiRect r{content.x + 8, top + static_cast<int>(i) * (row_h + gap), content.w - 16, row_h};
+            draw_ui_button(pixels, width, height, r, labels[i], i == menu_selection_, compact ? 1 : 2);
         }
-        draw_text(pixels, width, height, left + 18, top + panel_h - 26, "UP DOWN SELECT BACK", 0x009FB3C8u, 1);
+        if (!compact)
+            draw_text(pixels, width, height, content.x + 10, content.y + content.h - 24,
+                      "L3 CLOSES MENU. TOUCH OR CONTROLLER WORKS WITHOUT A MOUSE.", 0x008B9CA9u, 1);
         return;
     }
 
     if (overlay_mode_ == OverlayMode::Mapper) {
-        const std::array<const char*, 16> buttons = {"B", "Y", "SELECT", "START", "DPAD UP", "DPAD DOWN", "DPAD LEFT", "DPAD RIGHT",
-            "A", "X", "L", "R", "L2", "R2", "L3 MENU", "R3"};
-        const unsigned page = selected_control_ / 8;
-        const unsigned first = page * 8;
-        for (unsigned i = first; i < std::min(first + 8, 24u); ++i) {
-            const int y = top + 48 + static_cast<int>(i - first) * 22;
-            std::string source;
-            if (i < 16) source = buttons[i];
-            else {
-                static const std::array<const char*, 8> axes = {"LEFT X LEFT", "LEFT X RIGHT", "LEFT Y UP", "LEFT Y DOWN",
-                    "RIGHT X LEFT", "RIGHT X RIGHT", "RIGHT Y UP", "RIGHT Y DOWN"};
-                source = axes[i - 16];
-            }
-            std::string targets;
+        static const std::array<const char*, 24> sources = {
+            "B", "Y", "SELECT", "START", "DPAD UP", "DPAD DOWN", "DPAD LEFT", "DPAD RIGHT",
+            "A", "X", "L", "R", "L2", "R2", "L3 MENU", "R3",
+            "LEFT X -", "LEFT X +", "LEFT Y -", "LEFT Y +", "RIGHT X -", "RIGHT X +", "RIGHT Y -", "RIGHT Y +"};
+        draw_text(pixels, width, height, content.x + 8, content.y + 7,
+                  "PORT 1     SELECT A CONTROL TO EDIT FOUR BINDINGS", 0x00F4A94Au, 1);
+        const int top = content.y + 38;
+        const int gap = 6;
+        const unsigned columns = height < 400 ? 4u : 3u;
+        const unsigned rows = 24u / columns;
+        const int col_w = (content.w - static_cast<int>(columns - 1) * gap) / static_cast<int>(columns);
+        const int row_h = (content.h - 44 - static_cast<int>(rows - 1) * gap) / static_cast<int>(rows);
+        for (unsigned i = 0; i < 24; ++i) {
+            const unsigned row = i / columns, col = i % columns;
+            const UiRect r{content.x + static_cast<int>(col) * (col_w + gap),
+                           top + static_cast<int>(row) * (row_h + gap), col_w, row_h};
+            draw_ui_button(pixels, width, height, r, "", i == selected_control_, 1);
+            draw_text(pixels, width, height, r.x + 8, r.y + 5, sources[i],
+                      i == selected_control_ ? 0x00FFF0D3u : 0x00D1DCE5u, 1);
+            std::string binding;
+            unsigned shown = 0;
             for (unsigned action : mapping_[i]) {
-                if (action == 0) continue;
-                if (!targets.empty()) targets += " ";
-                targets += action_name(action);
+                if (!action) continue;
+                if (shown == 0) binding = action_name(action);
+                ++shown;
             }
-            if (targets.empty()) targets = "NONE";
-            draw_rect(pixels, width, height, left + 14, y - 3, panel_w - 28, 19,
-                      i == selected_control_ ? 0x00304458u : 0x001B2835u);
-            draw_text(pixels, width, height, left + 22, y, source, 0x00FFFFFFu, 1);
-            draw_text(pixels, width, height, left + 160, y, targets, 0x0000E5FFu, 1);
+            if (!shown) binding = "UNBOUND";
+            else if (shown > 1) binding += "  +" + std::to_string(shown - 1);
+            if (height >= 400)
+                draw_text(pixels, width, height, r.x + 8, r.y + row_h - 12, binding,
+                          i == selected_control_ ? 0x00F4A94Au : 0x008FA2B1u, 1);
         }
-        std::string page_label = "PAGE " + std::to_string(page + 1) + " OF 3";
-        draw_text(pixels, width, height, left + 18, top + panel_h - 28, page_label + "  A EDIT  B BACK", 0x009FB3C8u, 1);
         return;
     }
 
     if (overlay_mode_ == OverlayMode::MapperSlots) {
-        static const std::array<const char*, 24> labels = {"B", "Y", "SELECT", "START", "DPAD UP", "DPAD DOWN", "DPAD LEFT", "DPAD RIGHT",
-            "A", "X", "L", "R", "L2", "R2", "L3 MENU", "R3", "LEFT X LEFT", "LEFT X RIGHT", "LEFT Y UP", "LEFT Y DOWN",
-            "RIGHT X LEFT", "RIGHT X RIGHT", "RIGHT Y UP", "RIGHT Y DOWN"};
-        draw_text(pixels, width, height, left + 18, top + 42, "CONTROL " + std::string(labels[selected_control_]), 0x00B8D7FFu, 1);
+        static const std::array<const char*, 24> sources = {
+            "B", "Y", "SELECT", "START", "DPAD UP", "DPAD DOWN", "DPAD LEFT", "DPAD RIGHT",
+            "A", "X", "L", "R", "L2", "R2", "L3 MENU", "R3",
+            "LEFT X -", "LEFT X +", "LEFT Y -", "LEFT Y +", "RIGHT X -", "RIGHT X +", "RIGHT Y -", "RIGHT Y +"};
+        draw_text(pixels, width, height, content.x + 8, content.y + 5,
+                  "REBIND CONTROL: " + std::string(sources[selected_control_]), 0x00F4A94Au, 2);
+        draw_text(pixels, width, height, content.x + 8, content.y + 31,
+                  "UP TO FOUR ACTIONS RUN TOGETHER WHEN THIS CONTROL IS HELD", 0x008FA2B1u, 1);
+        const int top = content.y + 58;
+        const int gap = 8;
+        const int row_h = (content.h - 68 - 3 * gap) / 4;
         for (unsigned slot = 0; slot < 4; ++slot) {
-            const int y = top + 72 + static_cast<int>(slot) * 38;
-            draw_rect(pixels, width, height, left + 14, y - 5, panel_w - 28, 30,
-                      slot == selected_action_slot_ ? 0x00304458u : 0x001B2835u);
-            draw_text(pixels, width, height, left + 24, y + 2, "ACTION " + std::to_string(slot + 1), 0x00FFFFFFu, 1);
-            draw_text(pixels, width, height, left + 210, y + 2,
-                      action_name(mapping_[selected_control_][slot]), 0x0000E5FFu, 1);
+            const UiRect r{content.x + 8, top + static_cast<int>(slot) * (row_h + gap), content.w - 16, row_h};
+            const std::string label = "ACTION " + std::to_string(slot + 1) + "     " +
+                (mapping_[selected_control_][slot] ? action_name(mapping_[selected_control_][slot]) : "EMPTY - TAP TO BIND");
+            draw_ui_button(pixels, width, height, r, label, slot == selected_action_slot_, height < 400 ? 1 : 2);
         }
-        draw_text(pixels, width, height, left + 18, top + panel_h - 24, "A EDIT  NONE CLEARS  B BACK", 0x009FB3C8u, 1);
         return;
     }
 
-    const auto& keys = osk_keys(overlay_mode_ == OverlayMode::AssignKeyboard);
-    const unsigned columns = 8;
-    const int cell_w = (panel_w - 36) / static_cast<int>(columns);
-    const int cell_h = 28;
-    const unsigned total_rows = static_cast<unsigned>((keys.size() + columns - 1) / columns);
-    const unsigned visible_rows = static_cast<unsigned>(std::max(1, (panel_h - 92) / cell_h));
-    const unsigned selected_row = static_cast<unsigned>(keyboard_selection_ / columns);
-    const unsigned max_first_row = total_rows > visible_rows ? total_rows - visible_rows : 0;
-    const unsigned first_row = std::min(max_first_row,
+    if (overlay_mode_ == OverlayMode::Keyboard) {
+        const auto& rows = osk_layout();
+        unsigned flat = 0;
+        unsigned selected_row = 0, selected_col = 0;
+        for (unsigned row = 0; row < rows.size(); ++row) {
+            if (keyboard_selection_ < flat + rows[row].size()) {
+                selected_row = row;
+                selected_col = keyboard_selection_ - flat;
+                break;
+            }
+            flat += static_cast<unsigned>(rows[row].size());
+        }
+        const int top = content.y + 6;
+        const int gap = std::max(3, content.h / 100);
+        const int row_h = (content.h - 12 - gap * static_cast<int>(rows.size() - 1)) /
+                          static_cast<int>(rows.size());
+        flat = 0;
+        for (unsigned row = 0; row < rows.size(); ++row) {
+            unsigned units = 0;
+            for (const OskCell& cell : rows[row]) units += cell.units;
+            const int unit_w = content.w / static_cast<int>(units);
+            int x = content.x;
+            for (unsigned col = 0; col < rows[row].size(); ++col) {
+                const OskCell& cell = rows[row][col];
+                const int cell_w = unit_w * static_cast<int>(cell.units);
+                const UiRect r{x + 1, top + static_cast<int>(row) * (row_h + gap), cell_w - 3, row_h};
+                draw_ui_button(pixels, width, height, r, cell.label,
+                               (row == selected_row && col == selected_col) ||
+                                   (osk_latched_modifier_ != 0 && cell.key == osk_latched_modifier_),
+                               height < 400 || cell.units > 1 ? 1 : 2);
+                x += cell_w;
+                ++flat;
+            }
+        }
+        return;
+    }
+
+    // The rebinding target picker is grouped by destination so it remains usable
+    // on a phone-sized framebuffer and without a pointing device.
+    const std::array<const char*, 3> categories = {"KEYBOARD", "MOUSE", "JOYSTICK"};
+    const int category_gap = 6;
+    const int category_w = (content.w - 2 * category_gap) / 3;
+    for (unsigned i = 0; i < categories.size(); ++i) {
+        const UiRect r{content.x + static_cast<int>(i) * (category_w + category_gap), content.y,
+                       category_w, 40};
+        draw_ui_button(pixels, width, height, r, categories[i], i == assign_category_, 1);
+    }
+    const auto options = assign_options(assign_category_);
+    constexpr unsigned columns = 5;
+    const int grid_y = content.y + 48;
+    const int cell_h = 42;
+    const unsigned visible_rows = std::max(1, (content.h - 52) / cell_h);
+    const unsigned total_rows = static_cast<unsigned>((options.size() + columns - 1) / columns);
+    const unsigned selected_row = keyboard_selection_ / columns;
+    const unsigned first_row = std::min(total_rows > visible_rows ? total_rows - visible_rows : 0,
         selected_row > visible_rows / 2 ? selected_row - visible_rows / 2 : 0);
     const unsigned end_row = std::min(total_rows, first_row + visible_rows);
+    const int cell_w = content.w / static_cast<int>(columns);
     for (unsigned row = first_row; row < end_row; ++row) {
         for (unsigned col = 0; col < columns; ++col) {
             const unsigned i = row * columns + col;
-            if (i >= keys.size())
-                break;
-            const int x = left + 12 + static_cast<int>(col) * cell_w;
-            const int y = top + 52 + static_cast<int>(row - first_row) * cell_h;
-            draw_rect(pixels, width, height, x, y, cell_w - 3, cell_h - 3,
-                      i == keyboard_selection_ ? 0x0000A9C6u : 0x00233241u);
-            draw_text(pixels, width, height, x + 3, y + 7, keys[i].first, 0x00FFFFFFu, 1);
+            if (i >= options.size()) break;
+            const UiRect r{content.x + static_cast<int>(col) * cell_w + 2,
+                           grid_y + static_cast<int>(row - first_row) * cell_h,
+                           cell_w - 4, cell_h - 3};
+            draw_ui_button(pixels, width, height, r, action_name(options[i]), i == keyboard_selection_, 1);
         }
     }
-    const char* footer = overlay_mode_ == OverlayMode::AssignKeyboard
-        ? "PICK KEY OR MOUSE ACTION  NONE CLEARS"
-        : "PICK KEY TO TYPE  B BACK";
-    draw_text(pixels, width, height, left + 16, top + panel_h - 22, footer, 0x009FB3C8u, 1);
 }
 
 void SdlInputAdapter::keyboard_event(bool down,
@@ -869,6 +1177,7 @@ void SdlInputAdapter::reset() {
     release_gate_.fill(false);
     ui_button_previous_.fill(false);
     ui_axis_previous_.fill(false);
+    ui_pointer_previous_ = false;
     overlay_mode_ = OverlayMode::Closed;
     osk_latched_modifier_ = 0;
     left_down_ = false;
@@ -910,7 +1219,12 @@ void SdlInputAdapter::poll_and_enqueue() {
         state_(0, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_RIGHT, RETRO_DEVICE_ID_ANALOG_X),
         state_(0, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_RIGHT, RETRO_DEVICE_ID_ANALOG_Y)
     };
-    handle_overlay_input(current_buttons, axes);
+    const std::int16_t pointer_x = state_(0, RETRO_DEVICE_POINTER, 0, RETRO_DEVICE_ID_POINTER_X);
+    const std::int16_t pointer_y = state_(0, RETRO_DEVICE_POINTER, 0, RETRO_DEVICE_ID_POINTER_Y);
+    const bool pointer_pressed = state_(0, RETRO_DEVICE_POINTER, 0, RETRO_DEVICE_ID_POINTER_PRESSED) != 0;
+    const int touch_x = static_cast<int>((static_cast<std::int32_t>(pointer_x) + 32768) * (width_ - 1) / 65535);
+    const int touch_y = static_cast<int>((static_cast<std::int32_t>(pointer_y) + 32768) * (height_ - 1) / 65535);
+    handle_overlay_input(current_buttons, axes, pointer_pressed, touch_x, touch_y);
 
     std::array<bool, 24> next_mapped_sources{};
     const bool mapping_enabled = controller_mode_ == ControllerMode::GenericKeyboard ||
@@ -1008,9 +1322,6 @@ void SdlInputAdapter::poll_and_enqueue() {
     sync_all_key_states();
 
     bool pointer_valid = false;
-    const std::int16_t pointer_x = state_(0, RETRO_DEVICE_POINTER, 0, RETRO_DEVICE_ID_POINTER_X);
-    const std::int16_t pointer_y = state_(0, RETRO_DEVICE_POINTER, 0, RETRO_DEVICE_ID_POINTER_Y);
-    const bool pointer_pressed = state_(0, RETRO_DEVICE_POINTER, 0, RETRO_DEVICE_ID_POINTER_PRESSED) != 0;
     if (pointer_x || pointer_y || pointer_pressed) {
         cursor_x_ = static_cast<int>((static_cast<std::int32_t>(pointer_x) + 32768) * (width_ - 1) / 65535);
         cursor_y_ = static_cast<int>((static_cast<std::int32_t>(pointer_y) + 32768) * (height_ - 1) / 65535);

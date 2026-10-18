@@ -34,7 +34,8 @@ private:
     void sync_key_state(unsigned key);
     void sync_all_key_states();
     void handle_overlay_input(const std::array<bool, 16>& buttons,
-                              const std::array<std::int16_t, 4>& axes);
+                              const std::array<std::int16_t, 4>& axes,
+                              bool touch_pressed, int touch_x, int touch_y);
 
     retro_input_poll_t poll_;
     retro_input_state_t state_;
@@ -57,12 +58,14 @@ private:
     std::array<bool, 3> mapped_mouse_down_{};
     std::array<bool, 16> ui_button_previous_{};
     std::array<bool, 4> ui_axis_previous_{};
+    bool ui_pointer_previous_ = false;
     OverlayMode overlay_mode_ = OverlayMode::Closed;
     std::string config_file_;
     unsigned menu_selection_ = 0;
     unsigned selected_control_ = 0;
     unsigned selected_action_slot_ = 0;
     unsigned keyboard_selection_ = 0;
+    unsigned assign_category_ = 0;
     unsigned osk_latched_modifier_ = 0;
 };
 
