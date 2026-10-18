@@ -243,6 +243,65 @@ RETRO_API void RETRO_CALLCONV retro_set_environment(retro_environment_t callback
         {nullptr, nullptr}
     };
     callback(RETRO_ENVIRONMENT_SET_VARIABLES, const_cast<retro_variable*>(variables));
+
+    static const retro_controller_description controller_types[] = {
+        {"RetroPad", RETRO_DEVICE_JOYPAD},
+        {"RetroPad with Analog", RETRO_DEVICE_ANALOG}
+    };
+    static const retro_controller_info controller_info[] = {
+        {controller_types, 2},
+        {nullptr, 0}
+    };
+    callback(RETRO_ENVIRONMENT_SET_CONTROLLER_INFO, const_cast<retro_controller_info*>(controller_info));
+
+    static const retro_input_descriptor input_descriptors[] = {
+        {0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B, "B"},
+        {0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_Y, "Y"},
+        {0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT, "Select"},
+        {0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "Start"},
+        {0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP, "D-pad Up"},
+        {0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN, "D-pad Down"},
+        {0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT, "D-pad Left"},
+        {0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT, "D-pad Right"},
+        {0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A, "A"},
+        {0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_X, "X"},
+        {0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L, "L"},
+        {0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R, "R"},
+        {0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L2, "L2"},
+        {0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R2, "R2"},
+        {0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L3, "L3 (Controls Menu)"},
+        {0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R3, "R3"},
+        {0, RETRO_DEVICE_KEYBOARD, 0, RETROK_ESCAPE, "Keyboard Escape"},
+        {0, RETRO_DEVICE_KEYBOARD, 0, RETROK_RETURN, "Keyboard Enter"},
+        {0, RETRO_DEVICE_KEYBOARD, 0, RETROK_SPACE, "Keyboard Space"},
+        {0, RETRO_DEVICE_KEYBOARD, 0, RETROK_LCTRL, "Keyboard Left Control"},
+        {0, RETRO_DEVICE_KEYBOARD, 0, RETROK_LSHIFT, "Keyboard Left Shift"},
+        {0, RETRO_DEVICE_KEYBOARD, 0, RETROK_LALT, "Keyboard Left Alt"},
+        {0, RETRO_DEVICE_KEYBOARD, 0, RETROK_UP, "Keyboard Up"},
+        {0, RETRO_DEVICE_KEYBOARD, 0, RETROK_DOWN, "Keyboard Down"},
+        {0, RETRO_DEVICE_KEYBOARD, 0, RETROK_LEFT, "Keyboard Left"},
+        {0, RETRO_DEVICE_KEYBOARD, 0, RETROK_RIGHT, "Keyboard Right"},
+        {0, RETRO_DEVICE_KEYBOARD, 0, RETROK_a, "Keyboard A"},
+        {0, RETRO_DEVICE_KEYBOARD, 0, RETROK_d, "Keyboard D"},
+        {0, RETRO_DEVICE_KEYBOARD, 0, RETROK_s, "Keyboard S"},
+        {0, RETRO_DEVICE_KEYBOARD, 0, RETROK_w, "Keyboard W"},
+        {0, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_X, "Left Stick X"},
+        {0, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_Y, "Left Stick Y"},
+        {0, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_RIGHT, RETRO_DEVICE_ID_ANALOG_X, "Right Stick X"},
+        {0, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_RIGHT, RETRO_DEVICE_ID_ANALOG_Y, "Right Stick Y"},
+        {0, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_X, "Mouse X"},
+        {0, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_Y, "Mouse Y"},
+        {0, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_LEFT, "Mouse Left"},
+        {0, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_RIGHT, "Mouse Right"},
+        {0, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_MIDDLE, "Mouse Middle"},
+        {0, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_WHEELUP, "Mouse Wheel Up"},
+        {0, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_WHEELDOWN, "Mouse Wheel Down"},
+        {0, RETRO_DEVICE_POINTER, 0, RETRO_DEVICE_ID_POINTER_X, "Pointer X"},
+        {0, RETRO_DEVICE_POINTER, 0, RETRO_DEVICE_ID_POINTER_Y, "Pointer Y"},
+        {0, RETRO_DEVICE_POINTER, 0, RETRO_DEVICE_ID_POINTER_PRESSED, "Pointer Press"},
+        {0, RETRO_DEVICE_NONE, 0, 0, nullptr}
+    };
+    callback(RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS, const_cast<retro_input_descriptor*>(input_descriptors));
 }
 
 RETRO_API void RETRO_CALLCONV retro_set_video_refresh(retro_video_refresh_t callback) {
