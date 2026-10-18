@@ -9,7 +9,7 @@ namespace winebox {
 
 class SdlInputAdapter {
 public:
-    enum class ControllerMode { GenericKeyboard, Mouse };
+    enum class ControllerMode { GenericKeyboard, MouseLeftStick, MouseRightStick, CustomMapper };
 
     SdlInputAdapter(retro_input_poll_t poll, retro_input_state_t state, unsigned width, unsigned height);
     void set_dimensions(unsigned width, unsigned height);
@@ -24,11 +24,12 @@ public:
     void reset();
 
 private:
-    enum class OverlayMode { Closed, Menu, Mapper, Keyboard, AssignKeyboard };
+    enum class OverlayMode { Closed, Menu, Mapper, MapperSlots, Keyboard, AssignKeyboard };
 
     void load_default_mapping();
     void load_mapping();
     void save_mapping() const;
+    void sync_virtual_joystick();
     void update_sdl_modifiers();
     void sync_key_state(unsigned key);
     void sync_all_key_states();
@@ -50,14 +51,17 @@ private:
     std::array<bool, RETROK_LAST> callback_key_down_{};
     std::array<bool, RETROK_LAST> mapped_key_down_{};
     std::array<bool, RETROK_LAST> output_key_down_{};
-    std::array<unsigned, 24> mapping_{};
     std::array<bool, 24> release_gate_{};
+    std::array<bool, 24> mapped_source_down_{};
+    std::array<std::array<unsigned, 4>, 24> mapping_{};
+    std::array<bool, 3> mapped_mouse_down_{};
     std::array<bool, 16> ui_button_previous_{};
     std::array<bool, 4> ui_axis_previous_{};
     OverlayMode overlay_mode_ = OverlayMode::Closed;
     std::string config_file_;
     unsigned menu_selection_ = 0;
     unsigned selected_control_ = 0;
+    unsigned selected_action_slot_ = 0;
     unsigned keyboard_selection_ = 0;
     unsigned osk_latched_modifier_ = 0;
 };

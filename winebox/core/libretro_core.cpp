@@ -239,7 +239,7 @@ RETRO_API void RETRO_CALLCONV retro_set_environment(retro_environment_t callback
     static const retro_variable variables[] = {
         {"winebox_root", "Winebox root archive; TinyCore15Wine11.0.zip"},
         {"winebox_projector", "Flash projector executable; FlashPlayer.exe"},
-        {"winebox_controls", "Controller preset; Generic Keyboard|Mouse"},
+        {"winebox_controls", "Controller preset; Generic Keyboard|Mouse Left Stick|Mouse Right Stick|Custom Mapper"},
         {nullptr, nullptr}
     };
     callback(RETRO_ENVIRONMENT_SET_VARIABLES, const_cast<retro_variable*>(variables));
@@ -353,9 +353,12 @@ RETRO_API void RETRO_CALLCONV retro_run(void) {
     if (g_input) {
         std::string controls;
         if (get_variable("winebox_controls", controls)) {
-            g_input->set_controller_mode(controls == "Mouse"
-                ? winebox::SdlInputAdapter::ControllerMode::Mouse
-                : winebox::SdlInputAdapter::ControllerMode::GenericKeyboard);
+            using Mode = winebox::SdlInputAdapter::ControllerMode;
+            const Mode mode = controls == "Mouse Left Stick" ? Mode::MouseLeftStick
+                : controls == "Mouse Right Stick" ? Mode::MouseRightStick
+                : controls == "Custom Mapper" ? Mode::CustomMapper
+                : Mode::GenericKeyboard;
+            g_input->set_controller_mode(mode);
         }
         g_input->poll_and_enqueue();
     }
