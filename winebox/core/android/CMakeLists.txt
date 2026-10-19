@@ -54,6 +54,7 @@ set(BW_MINIZIP
 list(FILTER BW_CPP EXCLUDE REGEX "/source/test/")
 list(FILTER BW_CPP EXCLUDE REGEX "/source/ui/")
 list(FILTER BW_CPP EXCLUDE REGEX "/source/opengl/sdl/")
+list(FILTER BW_CPP EXCLUDE REGEX "/source/sdl/emscripten/")
 list(FILTER BW_CPP EXCLUDE REGEX "/source/util/networkutils\\.cpp$")
 list(FILTER BW_LINUX EXCLUDE REGEX "/platformOpenGL\\.cpp$")
 list(FILTER BW_SDL EXCLUDE REGEX "/knativescreenGL\\.cpp$")
@@ -75,6 +76,10 @@ if(ANDROID_ABI STREQUAL "arm64-v8a")
 endif()
 
 add_library(winebox_libretro SHARED ${WINEBOX_SOURCES})
+# BoxedWine references SDL_AndroidGetExternalStoragePath behind __ANDROID__
+# but omits SDL_system.h in startupArgs.cpp.
+set_source_files_properties("${BOXEDWINE_ROOT}/source/sdl/startupArgs.cpp"
+    PROPERTIES COMPILE_OPTIONS "-include;SDL_system.h")
 target_include_directories(winebox_libretro PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/../../bridge"
     "${CMAKE_CURRENT_LIST_DIR}/../../../docs/reference"
