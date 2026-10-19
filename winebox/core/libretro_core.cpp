@@ -175,8 +175,10 @@ bool prepare_launch(const retro_game_info* game) {
             return false;
         }
     }
+    const std::string boxedwine_log = (save_root / "boxedwine.log").string();
     log_message(RETRO_LOG_INFO, ("Winebox starting; root=" + root_archive.string() +
-                                 "; projector=" + projector.string() + "; swf=" + swf.string()).c_str());
+                                 "; projector=" + projector.string() + "; swf=" + swf.string() +
+                                 "; guest log=" + boxedwine_log).c_str());
 
     const std::string projector_name = projector.filename().string();
     const std::string swf_name = swf.filename().string();
@@ -191,7 +193,8 @@ bool prepare_launch(const retro_game_info* game) {
 
     // Preserve the root image's C: Wine prefix (including C:\\windows).
     // Mount user-supplied files on D: and E: instead of shadowing that prefix.
-    g_guest_args = {"winebox", "-root", g_save_dir, "-zip", root_archive.string(), "-novideo",
+    g_guest_args = {"winebox", "-log", boxedwine_log, "-root", g_save_dir,
+                    "-zip", root_archive.string(), "-novideo",
                     "-mount_drive", projector_parent, "d",
                     "-mount_drive", swf_parent, "e",
                     "/bin/wine", guest_projector, guest_swf};
@@ -438,8 +441,13 @@ RETRO_API void RETRO_CALLCONV retro_run(void) {
     if (!g_initialized || !g_host)
         return;
     if (g_game_loaded && g_guest_finished.load(std::memory_order_acquire) && !g_exit_reported) {
-        log_message(g_guest_exit_code == 0 ? RETRO_LOG_INFO : RETRO_LOG_WARN,
-                    g_guest_exit_code == 0 ? "BoxedWine guest exited normally." : "BoxedWine guest exited with an error.");
+        if (g_guest_exit_code == 0) {
+            log_message(RETRO_LOG_INFO, "BoxedWine guest exited normally.");
+        } else {
+            log_message(RETRO_LOG_WARN,
+                        ("BoxedWine guest exited with error code " +
+                         std::to_string(g_guest_exit_code) + ".").c_str());
+        }
         g_exit_reported = true;
     }
     if (g_input) {

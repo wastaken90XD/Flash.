@@ -21,7 +21,7 @@ Winebox does not download Windows or Wine files at runtime. Place these files un
 - `TinyCore15Wine11.0.zip` (or choose another leaf name using the `winebox_root` core option)
 - `FlashPlayer.exe` (or choose another leaf name using the `winebox_projector` core option)
 
-The core's writable guest root, copied content when RetroArch supplies it in memory, and controller mapping profiles are stored in RetroArch's save directory under `winebox/`. On Android, use RetroArch's own system/save directory settings and copy the two prerequisite files there with the Android file picker/file manager before launching content.
+The core's writable guest root, copied content when RetroArch supplies it in memory, controller mapping profiles, and detailed BoxedWine startup log are stored in RetroArch's save directory under `winebox/`. The guest log is `boxedwine.log` in that folder; use it to diagnose a black screen or early guest exit. On Android, use RetroArch's own system/save directory settings and copy the two prerequisite files there with the Android file picker/file manager before launching content.
 
 The core accepts SWFs as frontend-provided bytes as well as accessible filesystem paths. Its libretro system info and content override both advertise `swf` with `need_fullpath = false`; the core caches the supplied bytes before returning from `retro_load_game()`. This supports Android frontends that grant access to a selected document but do not expose a normal readable path to the core.
 
