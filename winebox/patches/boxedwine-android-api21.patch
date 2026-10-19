@@ -43,3 +43,16 @@ index 6f7640726fd41f011fa94e9fcd2ef5167398516f..406365b7c440c5afe99c75f47bbe3298
      if (SDL_Init(flags) != 0) {
          klog_fmt("SDL_Init Error: %s", SDL_GetError());
          return false;
+diff --git a/lib/sdl2/src/sensor/android/SDL_androidsensor.c b/lib/sdl2/src/sensor/android/SDL_androidsensor.c
+index d7c0a7e2..dcfd900c 100644
+--- a/lib/sdl2/src/sensor/android/SDL_androidsensor.c
++++ b/lib/sdl2/src/sensor/android/SDL_androidsensor.c
+@@ -162,7 +162,7 @@ SDL_ANDROID_SensorUpdate(SDL_Sensor *sensor)
+     ASensorEvent event;
+     struct android_poll_source* source;
+ 
+-    if (ALooper_pollAll(0, NULL, &events, (void**)&source) == LOOPER_ID_USER) {
++    if (ALooper_pollOnce(0, NULL, &events, (void**)&source) == LOOPER_ID_USER) {
+         SDL_zero(event);
+         while (ASensorEventQueue_getEvents(sensor->hwdata->eventqueue, &event, 1) > 0) {
+             SDL_PrivateSensorUpdate(sensor, event.data, SDL_arraysize(event.data));
