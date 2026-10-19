@@ -56,16 +56,37 @@ jobs:
       - name: Configure Android API 21 shared core
         shell: bash
         run: |
-          cmake -S winebox/core/android -B build/winebox-android \
-            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_LATEST_HOME/build/cmake/android.toolchain.cmake" \
-            -DANDROID_ABI="${{ matrix.abi }}" \
-            -DANDROID_PLATFORM=android-21 \
-            -DANDROID_ARM_NEON="${{ matrix.neon }}" \
-            -DBOXEDWINE_ROOT="$GITHUB_WORKSPACE/boxedwine" \
+          mkdir -p build
+          CMAKE_ARGS=(
+            -S winebox/core/android
+            -B build/winebox-android
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_LATEST_HOME/build/cmake/android.toolchain.cmake"
+            -DANDROID_ABI="${{ matrix.abi }}"
+            -DANDROID_PLATFORM=android-21
+            -DBOXEDWINE_ROOT="$GITHUB_WORKSPACE/boxedwine"
             -DCMAKE_BUILD_TYPE=Release
+          )
+          if [[ "${{ matrix.neon }}" == "ON" ]]; then
+            CMAKE_ARGS+=(-DANDROID_ARM_NEON=ON)
+          fi
+          if ! cmake "${CMAKE_ARGS[@]}" > build/winebox-configure.log 2>&1; then
+            cat build/winebox-configure.log
+            ERROR=$(tail -n 12 build/winebox-configure.log | tr '\n' ' ' | sed 's/%/%25/g; s/::/%3A%3A/g')
+            echo "::error title=Android CMake configure failed::$ERROR"
+            exit 1
+          fi
+          cat build/winebox-configure.log
 
       - name: Build libretro shared object
-        run: cmake --build build/winebox-android --target winebox_libretro --parallel 3
+        shell: bash
+        run: |
+          if ! cmake --build build/winebox-android --target winebox_libretro --parallel 3 > build/winebox-build.log 2>&1; then
+            tail -n 80 build/winebox-build.log
+            ERROR=$(tail -n 20 build/winebox-build.log | tr '\n' ' ' | sed 's/%/%25/g; s/::/%3A%3A/g')
+            echo "::error title=Android shared-core build failed::$ERROR"
+            exit 1
+          fi
+          cat build/winebox-build.log
 
       - name: Verify API floor, architecture, page alignment, and libretro exports
         shell: bash
