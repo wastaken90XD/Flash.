@@ -25,7 +25,7 @@ The core's writable guest root, copied content when RetroArch supplies it in mem
 
 The core accepts SWFs as frontend-provided bytes as well as accessible filesystem paths. Its libretro system info and content override both advertise `swf` with `need_fullpath = false`; the core caches the supplied bytes before returning from `retro_load_game()`. This supports Android frontends that grant access to a selected document but do not expose a normal readable path to the core.
 
-For manual Android installations, install both `winebox_libretro.so` in RetroArch's active Cores directory and the matching `winebox_libretro.info` in its active Core Info directory. The info file advertises `.swf` for RetroArch's content filtering; installing only the shared library may leave SWF files hidden from filtered browsing. Then reload the core list/content browser (or restart RetroArch) and choose the SWF through **Load Content**.
+On Android, do not try to copy files into RetroArch's app-private Core Info directory with a file manager; modern Android blocks that without elevated access. The current core registers `swf` and `need_fullpath = false` through libretro at runtime, so a separate `.info` file is not required for content browsing once this updated core is loaded. The artifact still includes the `.info` file for frontends that use external core metadata. After updating the core, restart/reload it, then use **Load Content** to browse to the SWF. If the file remains hidden, check RetroArch's file-browser extension filter or choose **All Files**; this Android path has not yet been smoke-tested on-device.
 
 ## Android controls
 
