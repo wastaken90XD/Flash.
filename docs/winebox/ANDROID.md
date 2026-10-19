@@ -10,9 +10,9 @@ The Android workflow builds against Android API 21 for:
 - `armeabi-v7a` with NEON enabled
 - `arm64-v8a` (upstream ARMv8 JIT enabled)
 
-The build pins BoxedWine commit `6c70c03c6a611a0993ccc922a4f10e658af02f49`, applies `winebox/patches/boxedwine-libretro-hooks.patch`, builds SDL2 as a PIC static library, and links BoxedWine plus the libretro bridge into `winebox_libretro.so`. The Android linker emits 16 KB-aligned ELF load segments for newer Android devices while retaining API 21 as the minimum OS target.
+The build pins BoxedWine commit `6c70c03c6a611a0993ccc922a4f10e658af02f49`, applies `winebox/patches/boxedwine-libretro-hooks.patch` and the Android API 21 addon patch, builds SDL2 as a PIC static library, and links BoxedWine plus the libretro bridge into `winebox_libretro.so`. The Android linker emits 16 KB-aligned ELF load segments for newer Android devices while retaining API 21 as the minimum OS target.
 
-A successful CI build verifies the Android ABI, libretro exports, and ELF layout. It does **not** prove that RetroArch or Winebox runs on a physical Android 5 device; the first Cortex-A7 / Android 5 smoke test is still required. ARMv7 interpreter performance is also unmeasured.
+The API 21 build matrix passed in GitHub Actions run `39184774948` for ARMv7 baseline, ARMv7 NEON, and ARM64. CI verifies the Android ABI, libretro exports, and ELF layout. It does **not** prove that RetroArch or Winebox runs on a physical Android 5 device; the first Cortex-A7 / Android 5 smoke test is still required. ARMv7 interpreter performance is also unmeasured.
 
 ## Required user-provided files
 
