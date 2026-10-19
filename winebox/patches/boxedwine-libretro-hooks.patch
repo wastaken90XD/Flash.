@@ -460,3 +460,21 @@ index fa70c79..fdf30bc 100644
          if (SDL_PollEvent(&e) != 1) {
  #if defined(__EMSCRIPTEN__) && defined(BOXEDWINE_MULTI_THREADED)
              if (customCount && KSystem::getMicroCounter() - customStart < 8000) {
+diff --git a/source/util/log.cpp b/source/util/log.cpp
+index 0000000..0000000 100644
+--- a/source/util/log.cpp
++++ b/source/util/log.cpp
+@@ -36,5 +36,6 @@
+     BOXEDWINE_CRITICAL_SECTION_WITH_MUTEX(logMutex);
+     if (KSystem::logFile.isOpen()) {
+         KSystem::logFile.write(msg);
++        KSystem::logFile.flush();
+     }
+     fwrite(msg.c_str(), 1, msg.length(), stderr);
+@@ -68,5 +69,6 @@
+     BOXEDWINE_CRITICAL_SECTION_WITH_MUTEX(logMutex);
+     if (KSystem::logFile.isOpen()) {
+         KSystem::logFile.write(msg);
++        KSystem::logFile.flush();
+     }
+     fwrite(msg.c_str(), 1, msg.length(), f);
