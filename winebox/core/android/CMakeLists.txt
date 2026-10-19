@@ -42,7 +42,9 @@ target_compile_options(SDL2-static PRIVATE -Wno-error=declaration-after-statemen
 file(GLOB_RECURSE BW_CPP CONFIGURE_DEPENDS "${BOXEDWINE_ROOT}/source/*.cpp")
 file(GLOB BW_LINUX CONFIGURE_DEPENDS "${BOXEDWINE_ROOT}/platform/linux/*.cpp")
 file(GLOB BW_SDL CONFIGURE_DEPENDS "${BOXEDWINE_ROOT}/platform/sdl/*.cpp")
-file(GLOB_RECURSE BW_SOFTFLOAT CONFIGURE_DEPENDS "${BOXEDWINE_ROOT}/lib/softfloat/source/*.c")
+file(GLOB BW_SOFTFLOAT CONFIGURE_DEPENDS
+    "${BOXEDWINE_ROOT}/lib/softfloat/source/*.c"
+    "${BOXEDWINE_ROOT}/lib/softfloat/source/8086-SSE/*.c")
 set(BW_MINIZIP
     "${BOXEDWINE_ROOT}/lib/zlib/contrib/minizip/ioapi.c"
     "${BOXEDWINE_ROOT}/lib/zlib/contrib/minizip/mztools.c"
