@@ -270,6 +270,13 @@ RETRO_API void RETRO_CALLCONV retro_set_environment(retro_environment_t callback
     };
     callback(RETRO_ENVIRONMENT_SET_VARIABLES, const_cast<retro_variable*>(variables));
 
+    static const retro_system_content_info_override content_overrides[] = {
+        {"swf", false, false},
+        {nullptr, false, false}
+    };
+    callback(RETRO_ENVIRONMENT_SET_CONTENT_INFO_OVERRIDE,
+             const_cast<retro_system_content_info_override*>(content_overrides));
+
     static const retro_controller_description controller_types[] = {
         {"RetroPad", RETRO_DEVICE_JOYPAD},
         {"RetroPad with Analog", RETRO_DEVICE_ANALOG}
@@ -407,7 +414,7 @@ RETRO_API void RETRO_CALLCONV retro_get_system_info(struct retro_system_info* in
     info->library_name = "Winebox";
     info->library_version = "0.1";
     info->valid_extensions = "swf";
-    info->need_fullpath = true;
+    info->need_fullpath = false;
     info->block_extract = true;
 }
 
