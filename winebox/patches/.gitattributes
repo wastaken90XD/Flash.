@@ -1,0 +1,2 @@
+# Patch hunks intentionally carry upstream whitespace and CRLF as patch data.
+*.patch -whitespace

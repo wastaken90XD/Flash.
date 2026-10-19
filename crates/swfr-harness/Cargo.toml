@@ -1,0 +1,20 @@
+[package]
+name = "swfr-harness"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+swfr-audio.workspace = true
+swfr-avm1.workspace = true
+swfr-libretro.workspace = true
+swfr-player.workspace = true
+swfr-reader.workspace = true
+swfr-render.workspace = true
+swfr-scene.workspace = true
+swfr-swf.workspace = true
+swfr-testkit.workspace = true
+
+[lints]
+workspace = true

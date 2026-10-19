@@ -1,0 +1,14 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <PreprocessorDefinitions>BOXEDWINE_LIBRETRO;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(MSBuildThisFileDirectory)..\bridge;$(MSBuildThisFileDirectory)..\..\docs\reference;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="$(MSBuildThisFileDirectory)libretro_core.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\bridge\retro_host.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\bridge\audio_adapter.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\bridge\input_sdl_adapter.cpp" />
+  </ItemGroup>
+</Project>

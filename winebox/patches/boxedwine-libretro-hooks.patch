@@ -1,0 +1,480 @@
+diff --git a/platform/sdl/kdspaudio.cpp b/platform/sdl/kdspaudio.cpp
+index 140d1a8..ca2f435 100644
+--- a/platform/sdl/kdspaudio.cpp
++++ b/platform/sdl/kdspaudio.cpp
+@@ -22,6 +22,11 @@
+ #include <SDL.h>
+ #include <algorithm>
+ #include "../../source/kernel/devs/oss.h"
++#ifdef BOXEDWINE_LIBRETRO
++#include "boxedwine_hooks.hpp"
++#include "retro_host.hpp"
++#include "audio_adapter.hpp"
++#endif
+ 
+ #define DSP_BUFFER_SIZE (1024*32)
+ 
+@@ -220,6 +225,28 @@ public:
+ 	}
+ 
+ 	void queueDeviceAudio(const void* data, U32 bytes) {
++#ifdef BOXEDWINE_LIBRETRO
++		if (winebox::RetroHost* host = winebox::current_host()) {
++			winebox::PcmFormat format;
++			if (this->got.format == AUDIO_U8) {
++				format = winebox::PcmFormat::unsigned_8;
++			} else if (SDL_AUDIO_ISFLOAT(this->got.format) && SDL_AUDIO_BITSIZE(this->got.format) == 32) {
++				format = winebox::PcmFormat::float_32;
++			} else if (SDL_AUDIO_BITSIZE(this->got.format) == 16) {
++				format = winebox::PcmFormat::signed_16;
++			} else if (SDL_AUDIO_BITSIZE(this->got.format) == 32) {
++				format = winebox::PcmFormat::signed_32;
++			} else {
++				kwarn("Winebox dropped audio with an unsupported SDL sample format");
++				return;
++			}
++			auto pcm = winebox::convert_audio_chunk(data, bytes, format, this->got.freq, this->got.channels);
++			if (!pcm.empty() && !host->queue_audio(pcm.data(), pcm.size() / 2)) {
++				kwarn("Winebox audio queue reached its configured capacity");
++			}
++		}
++		return;
++#endif
+ #ifdef __EMSCRIPTEN__
+ 		if (this->webDevice) {
+ 			U32 frames = bytes / (sizeof(float) * this->got.channels);
+@@ -469,6 +496,13 @@ void KDspAudioSdl::openAudio(U32 format, U32 freq, U32 channels) {
+ 	this->want.freq = freq;
+ 	this->want.channels = channels;
+ 	this->openedFormat = format;
++#ifdef BOXEDWINE_LIBRETRO
++	this->closeDevice();
++	this->got = this->want;
++	this->sameFormat = true;
++	this->open = true;
++	return;
++#endif
+ 
+ 	if (!KSystem::soundEnabled) {
+ 		this->open = true;
+diff --git a/platform/sdl/knativescreenSDL.cpp b/platform/sdl/knativescreenSDL.cpp
+index 7a5582d..80d2f85 100644
+--- a/platform/sdl/knativescreenSDL.cpp
++++ b/platform/sdl/knativescreenSDL.cpp
+@@ -25,6 +25,10 @@
+ #include "knativeinputSDL.h"
+ #include "knativescreenSDL.h"
+ #include "knativesystem.h"
++#ifdef BOXEDWINE_LIBRETRO
++#include "boxedwine_hooks.hpp"
++#include "retro_host.hpp"
++#endif
+ #include "kopengl.h"
+ #include "../../source/x11/x11.h"
+ #if defined(BOXEDWINE_NATIVE_RUNTIME) && defined(__linux__)
+@@ -141,6 +145,9 @@ KNativeScreenSDL::KNativeScreenSDL(U32 cx, U32 cy, U32 bpp, int scaleX, int scal
+     this->defaultScreenWidth = cx;
+     this->defaultScreenHeight = cy;
+     this->defaultScreenBpp = bpp;
++#ifdef BOXEDWINE_LIBRETRO
++    libretroFrame.assign(static_cast<std::size_t>(cx) * cy, 0x003A6EA5);
++#endif
+ 
+     recreateMainWindow();
+ }
+@@ -161,6 +168,12 @@ void KNativeScreenSDL::setScreenSize(U32 cx, U32 cy) {
+         return;
+     }
+     input->setScreenSize(cx, cy);
++#ifdef BOXEDWINE_LIBRETRO
++    {
++        std::lock_guard<std::mutex> lock(libretroFrameMutex);
++        libretroFrame.assign(static_cast<std::size_t>(cx) * cy, 0x003A6EA5);
++    }
++#endif
+ #if defined(__EMSCRIPTEN__) && defined(BOXEDWINE_OPENGL_SDL)
+     boxedwineSetWebGLPresentSize(cx, cy);
+ #endif
+@@ -291,6 +304,12 @@ void KNativeScreenSDL::showWindow(bool show) {
+ }
+ 
+ void KNativeScreenSDL::clear() {
++#ifdef BOXEDWINE_LIBRETRO
++    {
++        std::lock_guard<std::mutex> lock(libretroFrameMutex);
++        std::fill(libretroFrame.begin(), libretroFrame.end(), 0x003A6EA5);
++    }
++#endif
+ #ifdef BOXEDWINE_RECORDER
+     if (Recorder::instance) {
+         BOXEDWINE_MUTEX_LOCK(drawingMutex);
+@@ -433,6 +452,29 @@ void KNativeScreenSDL::putBitsOnWnd(U32 id, U8* bits, U32 bitsPerPixel, U32 srcP
+     } else if (bitsPerPixel == 16 && wnd->bits) {
+         bits = wnd->bits;
+     }
++#ifdef BOXEDWINE_LIBRETRO
++    if (KSystem::videoOption == VIDEO_NO_WINDOW && bits &&
++        (bitsPerPixel == 8 || bitsPerPixel == 16 || bitsPerPixel == 32)) {
++        const S32 screenW = static_cast<S32>(screenWidth());
++        const S32 screenH = static_cast<S32>(screenHeight());
++        const S32 startX = std::max<S32>(0, -dstX);
++        const S32 startY = std::max<S32>(0, -dstY);
++        const S32 endX = std::min<S32>(static_cast<S32>(width), screenW - dstX);
++        const S32 endY = std::min<S32>(static_cast<S32>(height), screenH - dstY);
++        if (endX > startX && endY > startY) {
++            const U32 rowPitch = (bitsPerPixel == 32) ? originalSrcPitch : dstPitch;
++            std::lock_guard<std::mutex> lock(libretroFrameMutex);
++            for (S32 sy = startY; sy < endY; ++sy) {
++                const auto* srcRow = reinterpret_cast<const U32*>(bits + static_cast<std::size_t>(sy) * rowPitch);
++                const std::size_t dstOffset = static_cast<std::size_t>(dstY + sy) * screenW + (dstX + startX);
++                for (S32 sx = startX; sx < endX; ++sx) {
++                    libretroFrame[dstOffset + static_cast<std::size_t>(sx - startX)] = srcRow[sx] & 0x00FFFFFF;
++                }
++            }
++            lastUpdateTime = KSystem::getMilliesSinceStart();
++        }
++    }
++#endif
+ #ifdef BOXEDWINE_RECORDER
+     if ((Recorder::instance || Player::instance) && screenBpp() > 8) {
+         int wndWidth = width;
+@@ -542,6 +584,18 @@ void KNativeScreenSDL::putBitsOnWnd(U32 id, U8* bits, U32 bitsPerPixel, U32 srcP
+ }
+ 
+ void KNativeScreenSDL::present() {
++#ifdef BOXEDWINE_LIBRETRO
++    if (KSystem::videoOption == VIDEO_NO_WINDOW) {
++        if (winebox::RetroHost* host = winebox::current_host()) {
++            // publish_video copies the pixels synchronously. Keep the source
++            // locked during that copy instead of making an intermediate frame.
++            std::lock_guard<std::mutex> lock(libretroFrameMutex);
++            host->publish_video(libretroFrame.data(), screenWidth(), screenHeight(), static_cast<std::size_t>(screenWidth()) * sizeof(U32));
++        }
++        presented = true;
++        return;
++    }
++#endif
+     const bool skipRenderer = skipHiddenRenderer(visible, showOnDraw);
+     if (KSystem::videoOption != VIDEO_NO_WINDOW && renderer && !skipRenderer) {
+         if (showOnDraw) {
+diff --git a/platform/sdl/knativescreenSDL.h b/platform/sdl/knativescreenSDL.h
+index 422b313..25832af 100644
+--- a/platform/sdl/knativescreenSDL.h
++++ b/platform/sdl/knativescreenSDL.h
+@@ -21,6 +21,9 @@
+ 
+ #include "knativescreen.h"
+ #include "knativeinputSDL.h"
++#ifdef BOXEDWINE_LIBRETRO
++#include <mutex>
++#endif
+ 
+ class WndCache {
+ public:
+@@ -138,6 +141,10 @@ private:
+     bool emscriptenSoftwareDirty = false;
+     bool emscriptenSoftwareDisabled = false;
+ #endif
++#ifdef BOXEDWINE_LIBRETRO
++    std::mutex libretroFrameMutex;
++    std::vector<U32> libretroFrame;
++#endif
+ 
+     void recreateMainWindow();
+     void destroyMainWindow();
+diff --git a/platform/sdl/knativesystem.cpp b/platform/sdl/knativesystem.cpp
+index 0934572..6f76407 100644
+--- a/platform/sdl/knativesystem.cpp
++++ b/platform/sdl/knativesystem.cpp
+@@ -147,6 +147,9 @@ void KNativeSystem::warpMouse(S32 x, S32 y) {
+ }
+ 
+ KOpenGLPtr KNativeSystem::getOpenGL() {
++#ifdef BOXEDWINE_LIBRETRO
++    return nullptr;
++#else
+     if (!opengl) {
+ #ifdef BOXEDWINE_OPENGL_OSMESA
+         if (KSystem::openglLib == "osmesa") {
+@@ -162,15 +165,20 @@ KOpenGLPtr KNativeSystem::getOpenGL() {
+ #endif
+     }
+     return opengl;
++#endif
+ }
+ 
+ KVulkanPtr KNativeSystem::getVulkan() {
++#ifdef BOXEDWINE_LIBRETRO
++    return nullptr;
++#else
+     if (!vulkan) {
+ #ifdef BOXEDWINE_VULKAN
+         vulkan = KVulkanSDL::create(screen);
+ #endif
+     }
+     return vulkan;
++#endif
+ }
+ 
+ void KNativeSystem::changeScreenSize(U32 cx, U32 cy) {
+@@ -234,7 +242,11 @@ void KNativeSystem::scheduledNewThread(KThread* thread) {
+ }
+ 
+ void KNativeSystem::exit(const char* msg, U32 code) {
++#ifdef BOXEDWINE_LIBRETRO
++    klog_fmt("BoxedWine exit (%u): %s", code, msg ? msg : "");
++#else
+     SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Error", msg, nullptr);
++#endif
+     _exit(code);
+ }
+ 
+@@ -266,11 +278,22 @@ void KNativeSystem::postQuit() {
+     SDL_PushEvent(&sdlevent);
+ }
+ 
++extern "C" void winebox_boxedwine_request_quit() {
++    KNativeSystem::postQuit();
++}
++
+ U32 KNativeSystem::getTicks() {
+     return SDL_GetTicks();
+ }
+ 
+ bool KNativeSystem::getScreenDimensions(U32* width, U32* height) {
++#ifdef BOXEDWINE_LIBRETRO
++    if (screen && width && height) {
++        *width = screen->screenWidth();
++        *height = screen->screenHeight();
++        return true;
++    }
++#endif
+     SDL_DisplayMode mode;
+     if (!SDL_GetCurrentDisplayMode(0, &mode)) {
+         *width = mode.w;
+diff --git a/source/sdl/startupArgs.cpp b/source/sdl/startupArgs.cpp
+index ef3473e..7b48c17 100644
+--- a/source/sdl/startupArgs.cpp
++++ b/source/sdl/startupArgs.cpp
+@@ -853,12 +853,14 @@ bool StartUpArgs::parseStartupArgs(int argc, const char **argv) {
+ #endif
+         } else if (!strcmp(argv[i], "-hideWindow")) {
+             this->videoOption = VIDEO_HIDE_WINDOW;
+-        } else if (!strcmp(argv[i], "-novideo")) {
+-#ifdef BOXEDWINE_MSVC
+-            this->videoOption = VIDEO_HIDE_WINDOW;
+-#else
+-            this->videoOption = VIDEO_NO_WINDOW;
+-#endif
++        } else if (!strcmp(argv[i], "-novideo")) {
++#ifdef BOXEDWINE_LIBRETRO
++            this->videoOption = VIDEO_NO_WINDOW;
++#elif defined(BOXEDWINE_MSVC)
++            this->videoOption = VIDEO_HIDE_WINDOW;
++#else
++            this->videoOption = VIDEO_NO_WINDOW;
++#endif
+         } else if (!strcmp(argv[i], "-env")) {
+ 			this->envValues.push_back(BString::copy(argv[i+1]));
+             i++;
+diff --git a/lib/sdl2/include/SDL_joystick.h b/lib/sdl2/include/SDL_joystick.h
+index a0dd720..aa56943 100644
+--- a/lib/sdl2/include/SDL_joystick.h
++++ b/lib/sdl2/include/SDL_joystick.h
+@@ -297,6 +297,12 @@ extern DECLSPEC int SDLCALL SDL_JoystickNumButtons(SDL_Joystick * joystick);
+  */
+ extern DECLSPEC void SDLCALL SDL_JoystickUpdate(void);
+ 
++/* Winebox frontend bridge: virtual joystick state for the libretro gamepad. */
++extern DECLSPEC void SDLCALL SDL_WineboxJoystickSetEnabled(SDL_bool enabled);
++extern DECLSPEC void SDLCALL SDL_WineboxJoystickSetAxis(int axis, Sint16 value);
++extern DECLSPEC void SDLCALL SDL_WineboxJoystickSetButton(int button, Uint8 value);
++extern DECLSPEC void SDLCALL SDL_WineboxJoystickSetHat(Uint8 value);
++
+ /**
+  *  Enable/disable joystick event polling.
+  *
+diff --git a/lib/sdl2/src/joystick/SDL_joystick.c b/lib/sdl2/src/joystick/SDL_joystick.c
+index 95aac9c..7a20d56 100644
+--- a/lib/sdl2/src/joystick/SDL_joystick.c
++++ b/lib/sdl2/src/joystick/SDL_joystick.c
+@@ -46,6 +46,100 @@
+ #include <tlhelp32.h>
+ #endif
+ 
++/* Winebox exposes a synthetic SDL joystick backed by frontend/libretro input. */
++static SDL_bool SDL_winebox_joystick_enabled = SDL_FALSE;
++static SDL_JoystickID SDL_winebox_joystick_instance = 0x57420001;
++static Sint16 SDL_winebox_joystick_axes[4] = { 0, 0, 0, 0 };
++static Uint8 SDL_winebox_joystick_buttons[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
++static Uint8 SDL_winebox_joystick_hat = SDL_HAT_CENTERED;
++static SDL_JoystickDriver SDL_Winebox_JoystickDriver;
++
++static int SDL_WineboxJoystickInit(void) { return 0; }
++static int SDL_WineboxJoystickGetCount(void) { return SDL_winebox_joystick_enabled ? 1 : 0; }
++static void SDL_WineboxJoystickDetect(void) { }
++static const char *SDL_WineboxJoystickGetDeviceName(int device_index)
++{
++    return (device_index == 0 && SDL_winebox_joystick_enabled) ? "Winebox Virtual Controller" : NULL;
++}
++static int SDL_WineboxJoystickGetDevicePlayerIndex(int device_index) { return device_index == 0 ? 0 : -1; }
++static void SDL_WineboxJoystickSetDevicePlayerIndex(int device_index, int player_index) { (void)device_index; (void)player_index; }
++static SDL_JoystickGUID SDL_WineboxJoystickGetDeviceGUID(int device_index)
++{
++    SDL_JoystickGUID guid;
++    (void)device_index;
++    SDL_memset(&guid, 0, sizeof(guid));
++    SDL_memcpy(guid.data, "WINEBOXVIRTUAL", 14);
++    return guid;
++}
++static SDL_JoystickID SDL_WineboxJoystickGetDeviceInstanceID(int device_index)
++{
++    return (device_index == 0 && SDL_winebox_joystick_enabled) ? SDL_winebox_joystick_instance : -1;
++}
++static int SDL_WineboxJoystickOpen(SDL_Joystick *joystick, int device_index)
++{
++    if (device_index != 0 || !SDL_winebox_joystick_enabled) return SDL_SetError("Winebox virtual joystick is disabled");
++    joystick->naxes = 4;
++    joystick->nhats = 1;
++    joystick->nballs = 0;
++    joystick->nbuttons = 8;
++    joystick->driver = &SDL_Winebox_JoystickDriver;
++    return 0;
++}
++static int SDL_WineboxJoystickRumble(SDL_Joystick *joystick, Uint16 low, Uint16 high)
++{ (void)joystick; (void)low; (void)high; return SDL_Unsupported(); }
++static void SDL_WineboxJoystickUpdate(SDL_Joystick *joystick)
++{
++    int i;
++    if (!joystick || !joystick->attached) return;
++    for (i = 0; i < 4; ++i) SDL_PrivateJoystickAxis(joystick, (Uint8)i, SDL_winebox_joystick_axes[i]);
++    for (i = 0; i < 8; ++i) SDL_PrivateJoystickButton(joystick, (Uint8)i, SDL_winebox_joystick_buttons[i]);
++    SDL_PrivateJoystickHat(joystick, 0, SDL_winebox_joystick_hat);
++}
++static void SDL_WineboxJoystickClose(SDL_Joystick *joystick) { (void)joystick; }
++static void SDL_WineboxJoystickQuit(void) { }
++static SDL_JoystickDriver SDL_Winebox_JoystickDriver = {
++    SDL_WineboxJoystickInit, SDL_WineboxJoystickGetCount, SDL_WineboxJoystickDetect,
++    SDL_WineboxJoystickGetDeviceName, SDL_WineboxJoystickGetDevicePlayerIndex,
++    SDL_WineboxJoystickSetDevicePlayerIndex, SDL_WineboxJoystickGetDeviceGUID,
++    SDL_WineboxJoystickGetDeviceInstanceID, SDL_WineboxJoystickOpen,
++    SDL_WineboxJoystickRumble, SDL_WineboxJoystickUpdate, SDL_WineboxJoystickClose,
++    SDL_WineboxJoystickQuit
++};
++
++void SDL_WineboxJoystickSetEnabled(SDL_bool enabled)
++{
++    const SDL_bool was_enabled = SDL_winebox_joystick_enabled;
++    SDL_LockJoysticks();
++    SDL_winebox_joystick_enabled = enabled ? SDL_TRUE : SDL_FALSE;
++    SDL_UnlockJoysticks();
++    if (was_enabled != SDL_winebox_joystick_enabled) {
++        if (SDL_winebox_joystick_enabled) SDL_PrivateJoystickAdded(SDL_winebox_joystick_instance);
++        else SDL_PrivateJoystickRemoved(SDL_winebox_joystick_instance);
++    }
++}
++void SDL_WineboxJoystickSetAxis(int axis, Sint16 value)
++{
++    if (axis >= 0 && axis < 4) {
++        SDL_LockJoysticks();
++        SDL_winebox_joystick_axes[axis] = value;
++        SDL_UnlockJoysticks();
++    }
++}
++void SDL_WineboxJoystickSetButton(int button, Uint8 value)
++{
++    if (button >= 0 && button < 8) {
++        SDL_LockJoysticks();
++        SDL_winebox_joystick_buttons[button] = value ? SDL_PRESSED : SDL_RELEASED;
++        SDL_UnlockJoysticks();
++    }
++}
++void SDL_WineboxJoystickSetHat(Uint8 value)
++{
++    SDL_LockJoysticks();
++    SDL_winebox_joystick_hat = value;
++    SDL_UnlockJoysticks();
++}
++
+ static SDL_JoystickDriver *SDL_joystick_drivers[] = {
+ #if defined(SDL_JOYSTICK_DINPUT) || defined(SDL_JOYSTICK_XINPUT)
+     &SDL_WINDOWS_JoystickDriver,
+@@ -75,8 +169,9 @@ static SDL_JoystickDriver *SDL_joystick_drivers[] = {
+     &SDL_HIDAPI_JoystickDriver,
+ #endif
+ #if defined(SDL_JOYSTICK_DUMMY) || defined(SDL_JOYSTICK_DISABLED)
+-    &SDL_DUMMY_JoystickDriver
++    &SDL_DUMMY_JoystickDriver,
+ #endif
++    &SDL_Winebox_JoystickDriver
+ };
+ static SDL_bool SDL_joystick_allows_background_events = SDL_FALSE;
+ static SDL_Joystick *SDL_joysticks = NULL;
+diff --git a/platform/sdl/knativeinputSDL.cpp b/platform/sdl/knativeinputSDL.cpp
+index fa70c79..fdf30bc 100644
+--- a/platform/sdl/knativeinputSDL.cpp
++++ b/platform/sdl/knativeinputSDL.cpp
+@@ -24,6 +24,32 @@
+ #include "knativeinputSDL.h"
+ #include "knativesystem.h"
+ #include "kdspaudio.h"
++#ifdef BOXEDWINE_LIBRETRO
++#include <deque>
++#include <mutex>
++
++namespace {
++std::mutex wineboxInputQueueMutex;
++std::deque<SDL_Event> wineboxInputQueue;
++constexpr std::size_t wineboxInputQueueLimit = 1024;
++}
++
++extern "C" int winebox_boxedwine_queue_input_event(const SDL_Event* event) {
++    if (!event) return 0;
++    std::lock_guard<std::mutex> lock(wineboxInputQueueMutex);
++    if (wineboxInputQueue.size() >= wineboxInputQueueLimit) return 0;
++    wineboxInputQueue.push_back(*event);
++    return 1;
++}
++
++static bool wineboxPopInputEvent(SDL_Event* event) {
++    std::lock_guard<std::mutex> lock(wineboxInputQueueMutex);
++    if (wineboxInputQueue.empty()) return false;
++    *event = wineboxInputQueue.front();
++    wineboxInputQueue.pop_front();
++    return true;
++}
++#endif
+ 
+ #ifdef __APPLE__
+ #include "../mac/macCursor.h"
+@@ -670,6 +696,12 @@ bool KNativeInputSDL::processEvents() {
+ #endif
+ 
+     while (true) {
++#ifdef BOXEDWINE_LIBRETRO
++        if (wineboxPopInputEvent(&e)) {
++            if (!handlSdlEvent(&e)) return false;
++            continue;
++        }
++#endif
+         if (SDL_PollEvent(&e) != 1) {
+ #if defined(__EMSCRIPTEN__) && defined(BOXEDWINE_MULTI_THREADED)
+             if (customCount && KSystem::getMicroCounter() - customStart < 8000) {
+diff --git a/source/util/log.cpp b/source/util/log.cpp
+index 0000000..0000000 100644
+--- a/source/util/log.cpp
++++ b/source/util/log.cpp
+@@ -36,5 +36,6 @@
+     BOXEDWINE_CRITICAL_SECTION_WITH_MUTEX(logMutex);
+     if (KSystem::logFile.isOpen()) {
+         KSystem::logFile.write(msg);
++        KSystem::logFile.flush();
+     }
+     fwrite(msg.c_str(), 1, msg.length(), stderr);
+@@ -68,5 +69,6 @@
+     BOXEDWINE_CRITICAL_SECTION_WITH_MUTEX(logMutex);
+     if (KSystem::logFile.isOpen()) {
+         KSystem::logFile.write(msg);
++        KSystem::logFile.flush();
+     }
+     fwrite(msg.c_str(), 1, msg.length(), f);

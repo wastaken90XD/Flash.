@@ -1,0 +1,19 @@
+[package]
+name = "swfr-testkit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+lzma-rs.workspace = true
+miniz_oxide.workspace = true
+png.workspace = true
+swfr-reader.workspace = true
+swfr-swf.workspace = true
+
+[dev-dependencies]
+swf = "0.3.0"
+
+[lints]
+workspace = true
