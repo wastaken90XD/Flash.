@@ -26,7 +26,7 @@ set(SDL_AUDIO ON CACHE BOOL "" FORCE)
 set(SDL_VIDEO ON CACHE BOOL "" FORCE)
 set(SDL_RENDER OFF CACHE BOOL "" FORCE)
 set(VIDEO_OPENGL OFF CACHE BOOL "" FORCE)
-set(VIDEO_OPENGLES OFF CACHE BOOL "" FORCE)
+set(VIDEO_OPENGLES ON CACHE BOOL "" FORCE)
 set(VIDEO_VULKAN OFF CACHE BOOL "" FORCE)
 set(SDL_JOYSTICK ON CACHE BOOL "" FORCE)
 set(SDL_HAPTIC OFF CACHE BOOL "" FORCE)
@@ -35,6 +35,9 @@ set(SDL_POWER OFF CACHE BOOL "" FORCE)
 set(SDL_SENSOR OFF CACHE BOOL "" FORCE)
 add_subdirectory("${BOXEDWINE_ROOT}/lib/sdl2" "${CMAKE_BINARY_DIR}/sdl2" EXCLUDE_FROM_ALL)
 target_compile_definitions(SDL2-static PRIVATE BOXEDWINE_LIBRETRO=1)
+# The pinned SDL2 Android sources have declarations after statements that
+# modern NDK Clang warns about; do not promote that warning to an error.
+target_compile_options(SDL2-static PRIVATE -Wno-error=declaration-after-statement)
 
 file(GLOB_RECURSE BW_CPP CONFIGURE_DEPENDS "${BOXEDWINE_ROOT}/source/*.cpp")
 file(GLOB BW_LINUX CONFIGURE_DEPENDS "${BOXEDWINE_ROOT}/platform/linux/*.cpp")
