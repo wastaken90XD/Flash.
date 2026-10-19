@@ -11,6 +11,8 @@
 #include <cctype>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
+#include <limits>
 #include <memory>
 #include <string>
 #include <thread>
@@ -103,7 +105,7 @@ std::string mapping_file_for_content(const char* path) {
 }
 
 bool prepare_launch(const retro_game_info* game) {
-    if (!game || !game->path || !g_environment)
+    if (!game || !g_environment)
         return false;
 
     const char* system_directory = nullptr;
@@ -136,7 +138,6 @@ bool prepare_launch(const retro_game_info* game) {
 
     const std::filesystem::path root_archive = system_root / root_leaf;
     const std::filesystem::path projector = system_root / projector_leaf;
-    const std::filesystem::path swf = std::filesystem::u8path(game->path);
     if (!regular_file(root_archive)) {
         log_message(RETRO_LOG_ERROR, ("Winebox root archive is missing or not a regular file: " + root_archive.string()).c_str());
         return false;
@@ -145,9 +146,34 @@ bool prepare_launch(const retro_game_info* game) {
         log_message(RETRO_LOG_ERROR, ("Winebox Flash projector is missing or not a regular file: " + projector.string()).c_str());
         return false;
     }
-    if (!regular_file(swf)) {
-        log_message(RETRO_LOG_ERROR, ("Winebox SWF is missing or not a regular file: " + swf.string()).c_str());
-        return false;
+    std::filesystem::path swf;
+    if (game->path) {
+        const auto requested_path = std::filesystem::u8path(game->path);
+        if (regular_file(requested_path))
+            swf = requested_path;
+    }
+    if (swf.empty()) {
+        if (!game->data || game->size == 0 ||
+            game->size > static_cast<std::size_t>(std::numeric_limits<std::streamsize>::max())) {
+            log_message(RETRO_LOG_ERROR, "Winebox needs an accessible SWF path or SWF bytes from the frontend.");
+            return false;
+        }
+        std::string swf_leaf = game->path
+            ? std::filesystem::u8path(game->path).filename().string() : "content.swf";
+        if (!safe_leaf_name(swf_leaf) || std::filesystem::u8path(swf_leaf).extension() != ".swf")
+            swf_leaf = "content.swf";
+        swf = save_root / swf_leaf;
+        std::ofstream output(swf, std::ios::binary | std::ios::trunc);
+        if (!output) {
+            log_message(RETRO_LOG_ERROR, ("Winebox could not create a cached SWF in its save directory: " + swf.string()).c_str());
+            return false;
+        }
+        output.write(static_cast<const char*>(game->data), static_cast<std::streamsize>(game->size));
+        output.close();
+        if (!output) {
+            log_message(RETRO_LOG_ERROR, ("Winebox could not write the cached SWF: " + swf.string()).c_str());
+            return false;
+        }
     }
     log_message(RETRO_LOG_INFO, ("Winebox starting; root=" + root_archive.string() +
                                  "; projector=" + projector.string() + "; swf=" + swf.string()).c_str());

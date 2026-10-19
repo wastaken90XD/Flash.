@@ -1,0 +1,45 @@
+diff --git a/lib/sdl2/src/joystick/SDL_joystick.c b/lib/sdl2/src/joystick/SDL_joystick.c
+index 7a20d566db67ec3ddff361b8632d5e58d4f56c1c..3c4b119fe515d118a2f5e7c77096be9278a89955 100644
+--- a/lib/sdl2/src/joystick/SDL_joystick.c
++++ b/lib/sdl2/src/joystick/SDL_joystick.c
+@@ -141,6 +141,7 @@ void SDL_WineboxJoystickSetHat(Uint8 value)
+ }
+ 
+ static SDL_JoystickDriver *SDL_joystick_drivers[] = {
++#ifndef BOXEDWINE_LIBRETRO
+ #if defined(SDL_JOYSTICK_DINPUT) || defined(SDL_JOYSTICK_XINPUT)
+     &SDL_WINDOWS_JoystickDriver,
+ #endif
+@@ -171,6 +172,7 @@ static SDL_JoystickDriver *SDL_joystick_drivers[] = {
+ #if defined(SDL_JOYSTICK_DUMMY) || defined(SDL_JOYSTICK_DISABLED)
+     &SDL_DUMMY_JoystickDriver,
+ #endif
++#endif /* !BOXEDWINE_LIBRETRO */
+     &SDL_Winebox_JoystickDriver
+ };
+ static SDL_bool SDL_joystick_allows_background_events = SDL_FALSE;
+diff --git a/platform/sdl/knativesystem.cpp b/platform/sdl/knativesystem.cpp
+index 6f7640726fd41f011fa94e9fcd2ef5167398516f..406365b7c440c5afe99c75f47bbe3298ded247bb 100644
+--- a/platform/sdl/knativesystem.cpp
++++ b/platform/sdl/knativesystem.cpp
+@@ -89,12 +89,20 @@ bool KNativeSystem::init(VideoOption videoOption, bool allowAudio) {
+         flags |= SDL_INIT_VIDEO;
+     }
+     if (allowAudio
++#if defined(BOXEDWINE_LIBRETRO)
++        // Libretro owns audio output; the core submits PCM through its frontend callback.
++        && false
++#endif
+ #if defined(__EMSCRIPTEN__) && defined(BOXEDWINE_WEB_WORKER)
+         && false
+ #endif
+         ) {
+         flags |= SDL_INIT_AUDIO;
+     }
++#ifdef BOXEDWINE_LIBRETRO
++    // Use the synthetic SDL joystick backed by libretro input callbacks.
++    flags |= SDL_INIT_JOYSTICK;
++#endif
+     if (SDL_Init(flags) != 0) {
+         klog_fmt("SDL_Init Error: %s", SDL_GetError());
+         return false;

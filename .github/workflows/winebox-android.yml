@@ -1,0 +1,114 @@
+name: winebox-android
+
+on:
+  push:
+    branches:
+      - main
+      - "arena/**"
+  pull_request:
+    paths:
+      - "winebox/**"
+      - "docs/winebox/**"
+      - ".github/workflows/winebox-android.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  BOXEDWINE_COMMIT: 6c70c03c6a611a0993ccc922a4f10e658af02f49
+
+jobs:
+  android-api21:
+    name: android-api21 (${{ matrix.name }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: armv7
+            abi: armeabi-v7a
+            neon: "OFF"
+          - name: armv7-neon
+            abi: armeabi-v7a
+            neon: "ON"
+          - name: arm64
+            abi: arm64-v8a
+            neon: "OFF"
+    steps:
+      - name: Checkout Winebox
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Checkout pinned BoxedWine
+        shell: bash
+        run: |
+          git clone --no-checkout https://github.com/danoon2/Boxedwine.git boxedwine
+          git -C boxedwine fetch --depth 1 origin "$BOXEDWINE_COMMIT"
+          git -C boxedwine checkout --detach FETCH_HEAD
+
+      - name: Apply and verify Winebox SDL/libretro hooks
+        run: |
+          git -C boxedwine apply --check ../winebox/patches/boxedwine-libretro-hooks.patch
+          git -C boxedwine apply ../winebox/patches/boxedwine-libretro-hooks.patch
+          git -C boxedwine apply --check ../winebox/patches/boxedwine-android-api21.patch
+          git -C boxedwine apply ../winebox/patches/boxedwine-android-api21.patch
+
+      - name: Configure Android API 21 shared core
+        shell: bash
+        run: |
+          cmake -S winebox/core/android -B build/winebox-android \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_LATEST_HOME/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI="${{ matrix.abi }}" \
+            -DANDROID_PLATFORM=android-21 \
+            -DANDROID_ARM_NEON="${{ matrix.neon }}" \
+            -DBOXEDWINE_ROOT="$GITHUB_WORKSPACE/boxedwine" \
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build libretro shared object
+        run: cmake --build build/winebox-android --target winebox_libretro --parallel 3
+
+      - name: Verify API floor, architecture, page alignment, and libretro exports
+        shell: bash
+        run: |
+          NDK_BIN="$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          SO="build/winebox-android/lib/${{ matrix.abi }}/libwinebox_libretro.so"
+          test -f "$SO"
+          "$NDK_BIN/llvm-readelf" -h "$SO"
+          "$NDK_BIN/llvm-readelf" -lW "$SO" | tee build/winebox-android/program-headers.txt
+          python3 - <<'PY'
+          import pathlib, re, sys
+          lines = pathlib.Path("build/winebox-android/program-headers.txt").read_text().splitlines()
+          loads = [line for line in lines if re.match(r"\s*LOAD\s", line)]
+          if not loads or any(int(line.split()[-1], 16) < 0x4000 for line in loads):
+              print("::error::Android ELF LOAD segments are not all aligned for 16 KB pages")
+              sys.exit(1)
+          print(f"Verified {len(loads)} Android ELF LOAD segments at 16 KB or greater alignment")
+          PY
+          "$NDK_BIN/llvm-nm" -D --defined-only "$SO" | grep -E ' T retro_'
+          COUNT=$("$NDK_BIN/llvm-nm" -D --defined-only "$SO" | grep -cE ' T retro_')
+          if [ "$COUNT" -lt 25 ]; then
+            echo "::error::Expected 25+ libretro exports, got $COUNT"
+            exit 1
+          fi
+          "$NDK_BIN/llvm-readelf" --version-info "$SO" > build/winebox-android/symbol-versions.txt
+          if grep -Eq 'GLIBC_[0-9]|GLIBCXX_[0-9]' build/winebox-android/symbol-versions.txt; then
+            echo "::error::Android core unexpectedly imports glibc/libstdc++ versioned symbols"
+            exit 1
+          fi
+
+      - name: Package Android core and info file
+        shell: bash
+        run: |
+          mkdir -p dist/winebox-android
+          cp "build/winebox-android/lib/${{ matrix.abi }}/libwinebox_libretro.so" dist/winebox-android/winebox_libretro.so
+          cp winebox/winebox_libretro.info dist/winebox-android/
+          cp build/winebox-android/symbol-versions.txt dist/winebox-android/
+          (cd dist/winebox-android && zip -r "../winebox-android-${{ matrix.name }}-api21.zip" .)
+
+      - name: Upload Android libretro core
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: winebox-android-${{ matrix.name }}-api21
+          path: dist/winebox-android-${{ matrix.name }}-api21.zip
+          if-no-files-found: error
+          retention-days: 7
